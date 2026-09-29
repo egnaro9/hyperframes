@@ -1,6 +1,7 @@
 // Components
 export { Player } from "./components/Player";
 export { PlayerControls } from "./components/PlayerControls";
+export { ShortcutsPanel } from "./components/ShortcutsPanel";
 export { Timeline } from "./components/Timeline";
 export { VideoThumbnail } from "./components/VideoThumbnail";
 export { CompositionThumbnail } from "./components/CompositionThumbnail";

@@ -15,6 +15,7 @@ export { useCompositionStack } from "./components/nle/useCompositionStack";
 export {
   Player,
   PlayerControls,
+  ShortcutsPanel,
   Timeline,
   VideoThumbnail,
   CompositionThumbnail,

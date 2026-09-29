@@ -50,3 +50,31 @@ describe("PlayerControls timecode", () => {
     observer.disconnect();
   });
 });
+
+describe("PlayerControls controls a host carries itself", () => {
+  const LABELS = ["Preview volume", "Playback speed", "Enable loop playback", "Shortcuts and tools"];
+  const shown = () => LABELS.filter((label) => host.querySelector(`[aria-label="${label}"]`));
+  const render = (props: Partial<React.ComponentProps<typeof PlayerControls>>) =>
+    act(async () =>
+      root.render(
+        React.createElement(PlayerControls, { onTogglePlay: () => {}, onSeek: () => {}, ...props }),
+      ),
+    );
+
+  it("shows volume, speed, loop and shortcuts by default", () => {
+    expect(shown()).toEqual(LABELS);
+  });
+
+  it("leaves out each control the host turns off, and keeps the rest", async () => {
+    await render({ showVolume: false, showLoop: false });
+    expect(shown()).toEqual(["Playback speed", "Shortcuts and tools"]);
+    await render({ showSpeed: false, showShortcuts: false });
+    expect(shown()).toEqual(["Preview volume", "Enable loop playback"]);
+  });
+
+  it("shows fullscreen only when the host passes a toggle", async () => {
+    expect(host.querySelector('[aria-label="Enter fullscreen"]')).toBeNull();
+    await render({ onToggleFullscreen: () => {} });
+    expect(host.querySelector('[aria-label="Enter fullscreen"]')).not.toBeNull();
+  });
+});

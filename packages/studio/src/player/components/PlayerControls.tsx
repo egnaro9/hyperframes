@@ -164,6 +164,11 @@ interface PlayerControlsProps {
   onToggleFullscreen?: () => void;
   /** Replaces the shortcuts panel's list, e.g. DEFAULT_SHORTCUT_SECTIONS with entries dropped or relabelled. */
   shortcutSections?: readonly ShortcutSection[];
+  /** On by default; a host that carries a control on its own bar turns it off here. */
+  showVolume?: boolean;
+  showSpeed?: boolean;
+  showLoop?: boolean;
+  showShortcuts?: boolean;
 }
 
 export const PlayerControls = memo(function PlayerControls({
@@ -173,6 +178,10 @@ export const PlayerControls = memo(function PlayerControls({
   isFullscreen = false,
   onToggleFullscreen,
   shortcutSections,
+  showVolume = true,
+  showSpeed = true,
+  showLoop = true,
+  showShortcuts = true,
 }: PlayerControlsProps) {
   const isPlaying = usePlayerStore((s) => s.isPlaying);
   const duration = usePlayerStore((s) => s.duration);
@@ -268,36 +277,44 @@ export const PlayerControls = memo(function PlayerControls({
         </Tooltip>
 
         <div className="flex min-w-0 items-center justify-self-end">
-          <VolumeControl
-            audioMuted={audioMuted}
-            audioVolume={audioVolume}
-            disabled={controlsDisabled}
-            setAudioMuted={setAudioMuted}
-            setAudioVolume={setAudioVolume}
-          />
-          <SpeedMenu
-            playbackRate={playbackRate}
-            setPlaybackRate={setPlaybackRate}
-            disabled={disabled}
-          />
-          <LoopButton
-            loopEnabled={loopEnabled}
-            disabled={disabled}
-            setLoopEnabled={setLoopEnabled}
-          />
+          {showVolume && (
+            <VolumeControl
+              audioMuted={audioMuted}
+              audioVolume={audioVolume}
+              disabled={controlsDisabled}
+              setAudioMuted={setAudioMuted}
+              setAudioVolume={setAudioVolume}
+            />
+          )}
+          {showSpeed && (
+            <SpeedMenu
+              playbackRate={playbackRate}
+              setPlaybackRate={setPlaybackRate}
+              disabled={disabled}
+            />
+          )}
+          {showLoop && (
+            <LoopButton
+              loopEnabled={loopEnabled}
+              disabled={disabled}
+              setLoopEnabled={setLoopEnabled}
+            />
+          )}
           {onToggleFullscreen && (
             <FullscreenButton isFullscreen={isFullscreen} onToggleFullscreen={onToggleFullscreen} />
           )}
-          <ShortcutsPanel
-            disabled={disabled}
-            duration={duration}
-            inPoint={inPoint}
-            outPoint={outPoint}
-            setInPoint={setInPoint}
-            setOutPoint={setOutPoint}
-            onSeek={onSeek}
-            sections={shortcutSections}
-          />
+          {showShortcuts && (
+            <ShortcutsPanel
+              disabled={disabled}
+              duration={duration}
+              inPoint={inPoint}
+              outPoint={outPoint}
+              setInPoint={setInPoint}
+              setOutPoint={setOutPoint}
+              onSeek={onSeek}
+              sections={shortcutSections}
+            />
+          )}
         </div>
       </div>
     </div>
