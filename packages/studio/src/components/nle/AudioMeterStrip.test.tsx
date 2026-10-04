@@ -4,7 +4,7 @@
 import { act } from "react";
 import { MAX_AUDIO_GAIN } from "@hyperframes/core/audio-gain";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { usePlayerStore } from "../../player/store/playerStore";
 import type { TimelineElement } from "../../player/store/timelineElement";
 import { useAudioMetersVisible } from "../../utils/audioMeterVisibility";
@@ -96,7 +96,7 @@ beforeEach(() => {
   frames = [];
   vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => frames.push(cb));
   vi.stubGlobal("cancelAnimationFrame", () => {});
-  usePlayerStore.setState({ elements: [], audioVolume: 1 });
+  usePlayerStore.setState({ elements: [], audioVolume: 1, isPlaying: false });
   useAudioMetersVisible.setState({ visible: true });
   onSetAudioGroupAttributeLive.mockClear();
   onSetAudioGroupAttributeQuiet.mockClear();
@@ -163,6 +163,37 @@ describe("AudioMeterStrip", () => {
     act(() => root.unmount());
     roots.length = 0;
     expect(second.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets the bars fall after a pause, then asks for no frames until playback starts", () => {
+    let clock = 1000;
+    const now = vi.spyOn(performance, "now").mockImplementation(() => clock);
+    onTestFinished(() => now.mockRestore());
+    usePlayerStore.setState({ elements: [clip({ audioGroup: "vo" })], isPlaying: true });
+    const hook = makeHook({ vo: { l: 1, r: 1 } });
+    setHook(hook);
+    const { host } = mount();
+    tick();
+    tick();
+    const mask = host.querySelector<HTMLElement>("[data-testid=meter-mask]")!;
+    expect(mask.style.height).toBe("0%");
+
+    hook.read.mockReturnValue({ master: { l: 0, r: 0 }, groups: {} });
+    act(() => usePlayerStore.setState({ isPlaying: false }));
+    let falling = 0;
+    while (frames.length > 0 && falling < 1000) {
+      clock += 16;
+      tick();
+      falling++;
+    }
+    expect(falling).toBeGreaterThan(1);
+    expect(frames).toHaveLength(0);
+    expect(mask.style.height).toBe("100%");
+
+    act(() => usePlayerStore.setState({ currentTime: 3 }));
+    expect(frames).toHaveLength(0);
+    act(() => usePlayerStore.setState({ isPlaying: true }));
+    expect(frames).toHaveLength(1);
   });
 
   it("follows a new preview hook even when the old stop() throws", () => {

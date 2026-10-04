@@ -187,14 +187,17 @@ export function stepAndPaintStrips(
   levels: Levels | undefined,
   now: number,
   dt: number,
-): void {
+): boolean {
+  let moved = false;
   for (const { id } of strips) {
     const prev = state.get(id);
     const next = stepPair(prev, id === null ? levels?.master : levels?.groups[id], now, dt);
     if (next === prev) continue;
+    moved = true;
     state.set(id, next);
     paint(bars.get(id), next);
   }
+  return moved;
 }
 
 /** One rAF loop re-reads the hook off the live preview window, so a reloaded iframe is followed. */
@@ -219,21 +222,31 @@ function useMeterLoop(
     let last = performance.now();
     const state = new Map<string | null, Pair>();
     const tick = (now: number) => {
-      raf = requestAnimationFrame(tick);
+      raf = 0;
       active = followMeterHook(active, readHook(previewIframeRef?.current));
       const levels = active?.read();
       const dt = now - last;
       last = now;
       evictGoneMeterState(state, new Set(stripsRef.current.map((s) => s.id)));
-      stepAndPaintStrips(stripsRef.current, state, bars.current, levels, now, dt);
+      const moved = stepAndPaintStrips(stripsRef.current, state, bars.current, levels, now, dt);
       const lit = stepClipLatch(clip.current.lit, levels?.master);
       if (lit !== clip.current.lit) {
         clip.current.lit = lit;
         paintClipLight(clip.current.light, lit);
       }
+      if (moved || usePlayerStore.getState().isPlaying) raf = requestAnimationFrame(tick);
     };
-    raf = requestAnimationFrame(tick);
+    const wake = () => {
+      if (raf) return;
+      last = performance.now();
+      raf = requestAnimationFrame(tick);
+    };
+    wake();
+    const unsubscribe = usePlayerStore.subscribe((s) => {
+      if (s.isPlaying) wake();
+    });
     return () => {
+      unsubscribe();
       cancelAnimationFrame(raf);
       try {
         active?.stop();
