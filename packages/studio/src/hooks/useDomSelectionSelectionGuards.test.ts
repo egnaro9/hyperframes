@@ -294,6 +294,119 @@ describe("useDomSelection — timeline-select race guard", () => {
   });
 });
 
+// A save refreshes the selection after it lands; a deselect or a new pick made while the
+// refresh resolves is the user's latest word, and the refresh must not undo it.
+describe("useDomSelection — a refresh never brings back a selection the user left", () => {
+  beforeEach(() => deferreds.clear());
+  afterEach(() => deferreds.clear());
+
+  function setup() {
+    const iframe = document.createElement("iframe");
+    document.body.append(iframe);
+    const doc = iframe.contentDocument!;
+    const elA = doc.createElement("div");
+    elA.id = "a";
+    const elB = doc.createElement("div");
+    elB.id = "b";
+    doc.body.append(elA, elB);
+    const harness = renderHarness({
+      rightPanelTab: "design",
+      setRightPanelTab: vi.fn(),
+      iframe,
+      timelineElements: [],
+    });
+    const selectionA = makeSelection("A", elA);
+    act(() => harness.current().applyDomSelection(selectionA, { revealPanel: false }));
+    return { iframe, elB, harness, selectionA };
+  }
+
+  const refreshes = {
+    single: (h: ReturnType<typeof setup>["harness"], s: DomEditSelection) =>
+      h.current().refreshDomEditSelectionFromPreview(s),
+    group: (h: ReturnType<typeof setup>["harness"], s: DomEditSelection) =>
+      h.current().refreshDomEditGroupSelectionsFromPreview([s]),
+  };
+
+  it.each(["single", "group"] as const)("keeps a deselect made during a %s refresh", async (kind) => {
+    const { iframe, harness, selectionA } = setup();
+    let refresh: Promise<void> = Promise.resolve();
+    act(() => {
+      refresh = refreshes[kind](harness, selectionA);
+    });
+    act(() => harness.current().applyDomSelection(null, { revealPanel: false }));
+    await act(async () => {
+      deferreds.get("a")?.resolve();
+      await refresh;
+    });
+    expect(harness.current().domEditSelection).toBeNull();
+    harness.cleanup();
+    iframe.remove();
+  });
+
+  it.each(["single", "group"] as const)("keeps a new pick made during a %s refresh", async (kind) => {
+    const { iframe, elB, harness, selectionA } = setup();
+    let refresh: Promise<void> = Promise.resolve();
+    act(() => {
+      refresh = refreshes[kind](harness, selectionA);
+    });
+    act(() => harness.current().applyDomSelection(makeSelection("B", elB), { revealPanel: false }));
+    await act(async () => {
+      deferreds.get("a")?.resolve();
+      await refresh;
+    });
+    expect(harness.current().domEditSelection?.id).toBe("b");
+    harness.cleanup();
+    iframe.remove();
+  });
+
+  it.each(["single", "group"] as const)(
+    "drops a %s refresh asked for after the user deselected",
+    async (kind) => {
+      const { iframe, harness, selectionA } = setup();
+      act(() => harness.current().applyDomSelection(null, { revealPanel: false }));
+      let refresh: Promise<void> = Promise.resolve();
+      act(() => {
+        refresh = refreshes[kind](harness, selectionA);
+      });
+      await act(async () => {
+        deferreds.get("a")?.resolve();
+        await refresh;
+      });
+      expect(harness.current().domEditSelection).toBeNull();
+      harness.cleanup();
+      iframe.remove();
+    },
+  );
+
+  it("keeps a new pick when a refresh for the old one finds it gone", async () => {
+    const { iframe, elB, harness, selectionA } = setup();
+    act(() => harness.current().applyDomSelection(makeSelection("B", elB), { revealPanel: false }));
+    selectionA.element.remove();
+    await act(async () => {
+      await harness.current().refreshDomEditSelectionFromPreview(selectionA);
+    });
+    expect(harness.current().domEditSelection?.id).toBe("b");
+    harness.cleanup();
+    iframe.remove();
+  });
+
+  it("still re-resolves the selection when nothing changed meanwhile", async () => {
+    const { iframe, harness, selectionA } = setup();
+    let refresh: Promise<void> = Promise.resolve();
+    act(() => {
+      refresh = refreshes.single(harness, selectionA);
+    });
+    await act(async () => {
+      deferreds.get("a")?.resolve();
+      await refresh;
+    });
+    expect(harness.current().domEditSelection?.label).toBe("A");
+    expect(harness.current().domEditSelection).not.toBe(selectionA);
+    harness.cleanup();
+    iframe.remove();
+  });
+});
+
 describe("useDomSelection — marquee multi-select survives the late async primary", () => {
   beforeEach(() => {
     deferreds.clear();

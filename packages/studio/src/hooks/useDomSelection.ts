@@ -358,6 +358,9 @@ export function useDomSelection({
   const refreshDomEditSelectionFromPreview = useCallback(
     // fallow-ignore-next-line complexity
     async (selection: DomEditSelection) => {
+      // A deselect or a new pick made since the caller read this selection is newer than the refresh.
+      const stillSelected = () => domEditSelectionsTargetSame(domEditSelectionRef.current, selection);
+      if (!stillSelected()) return;
       const iframe = previewIframeRef.current;
       let doc: Document | null = null;
       try {
@@ -385,7 +388,7 @@ export function useDomSelection({
       }
 
       const nextSelection = await buildDomSelectionFromTarget(element);
-      if (nextSelection) {
+      if (nextSelection && stillSelected()) {
         applyDomSelection(nextSelection, {
           revealPanel: false,
           preserveGroup: true,
@@ -398,6 +401,7 @@ export function useDomSelection({
   const refreshDomEditGroupSelectionsFromPreview = useCallback(
     // fallow-ignore-next-line complexity
     async (selections: DomEditSelection[]) => {
+      const stillSelected = () => domEditSelectionInGroup(selections, domEditSelectionRef.current);
       const iframe = previewIframeRef.current;
       let doc: Document | null = null;
       try {
@@ -414,7 +418,7 @@ export function useDomSelection({
         const nextSelection = await buildDomSelectionFromTarget(element);
         if (nextSelection) nextGroup.push(nextSelection);
       }
-      if (nextGroup.length === 0) return;
+      if (nextGroup.length === 0 || !stillSelected()) return;
 
       const currentSelection = domEditSelectionRef.current;
       const nextSelection =

@@ -10,6 +10,7 @@ import { useDockLayoutStore } from "../components/dock/dockLayoutStore";
 import type { PatchTarget } from "../utils/sourcePatcher";
 import { logSelect } from "../utils/selectDebug";
 import { onPreviewContentReplaced } from "../player/sceneSwap";
+import { domEditSelectionsTargetSame } from "../utils/domEditHelpers";
 
 interface UseDomEditPreviewSyncParams {
   previewIframe: HTMLIFrameElement | null;
@@ -97,7 +98,8 @@ export function useDomEditPreviewSync({
       }
 
       const nextSelection = await buildDomSelectionFromTarget(nextElement);
-      if (nextSelection) {
+      // A deselect or a new pick made while this resolved is newer than the sync.
+      if (nextSelection && domEditSelectionsTargetSame(domEditSelectionRef.current, currentSelection)) {
         applyDomSelection(nextSelection, { revealPanel: false, preserveGroup: true });
       }
     };
