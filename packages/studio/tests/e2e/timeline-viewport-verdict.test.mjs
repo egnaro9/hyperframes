@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 import { TIMELINE_VIEWPORT_BUDGETS } from "../../src/player/lib/timelineViewportBudgets";
 import {
   attemptPassed,
+  frameWorkRun,
   gatePassed,
   judgeResponsiveness,
   percentile,
   responsivenessLimits,
+  summarizeFrameWork,
 } from "./timeline-viewport-verdict.mjs";
 
 const LIMITS = { samplesPerRun: 63, interactionLimitMs: 75, frameIntervalLimitMs: 75 };
@@ -144,5 +146,87 @@ describe("gatePassed", () => {
     expect(gatePassed({ ...passing, attempts: [fail, fail] })).toBe(false);
     expect(gatePassed({ ...passing, attempts: [fail, fail, pass] })).toBe(false);
     expect(gatePassed({ ...passing, attempts: [] })).toBe(false);
+  });
+});
+
+describe("summarizeFrameWork", () => {
+  const step = (transition, maxFrameWorkMs, droppedFrames = 0, settled = true) => ({
+    transition,
+    maxFrameWorkMs,
+    droppedFrames,
+    settled,
+    workMs: maxFrameWorkMs * 2,
+  });
+  // Two runs of 20 steps: two mount steps each with 2 drops, the rest at 5 ms. Four of 40 is over 5%.
+  const run = (mountMs) => ({
+    steps: [
+      step("0->0.25", mountMs, 2),
+      step("0->0.25", mountMs, 2),
+      ...Array.from({ length: 18 }, () => step("0.5->0.75", 5)),
+    ],
+  });
+
+  it("pools steps for the p95 and keeps each run and transition apart", () => {
+    const summary = summarizeFrameWork([run(40), run(48)]);
+    expect(summary).toMatchObject({
+      steps: 40,
+      maxFrameWorkP95Ms: 40,
+      maxFrameWorkMs: 48,
+      droppedFrames: 8,
+      maxStepDroppedFrames: 2,
+      unsettledSteps: 0,
+    });
+    expect(summary.runs.map((one) => one.maxFrameWorkMs)).toEqual([40, 48]);
+    expect(summary.byTransition["0->0.25"]).toMatchObject({
+      steps: 4,
+      maxFrameWorkMs: 48,
+      droppedFrames: 8,
+      workMedianMs: 80,
+    });
+    expect(summary.byTransition["0.5->0.75"]).toMatchObject({ steps: 36, droppedFrames: 0 });
+  });
+
+  it("counts a step that hit the frame cap as unsettled", () => {
+    const capped = { steps: [step("0->0", 3, 0, false), step("0->0.25", 9)] };
+    expect(summarizeFrameWork([capped]).unsettledSteps).toBe(1);
+  });
+});
+
+describe("frameWorkRun", () => {
+  const frame = (begin, end, gaps) => ({ begin, end, gaps });
+  const gaps = [16.7, 16.7, 16.6, 16.7, 50, 16.7, 33.4, 16.7];
+
+  it("books a frame that ran past the next one at its real length and counts the frames it dropped", () => {
+    const run = frameWorkRun({
+      gaps,
+      steps: [
+        {
+          transition: "0->0.25",
+          settled: true,
+          assignMs: 0.4,
+          keepAliveScrolls: 1,
+          frames: [
+            frame(100, 147.2, [16.7, 50]),
+            frame(166.7, 169.2, [16.7]),
+            frame(183.4, 184, [16.7]),
+          ],
+        },
+      ],
+    });
+    expect(run.frameIntervalMs).toBe(16.7);
+    expect(run.steps[0]).toEqual({
+      transition: "0->0.25",
+      settled: true,
+      frameWorkMs: [47.2, 2.5, 0.6],
+      maxFrameWorkMs: 47.2,
+      workMs: 50.7,
+      droppedFrames: 2,
+      keepAliveScrolls: 1,
+    });
+  });
+
+  it("drops nothing for a gap under one and a half frame intervals", () => {
+    const step = { transition: "0->0", settled: true, assignMs: 0, frames: [frame(0, 1, [24])] };
+    expect(frameWorkRun({ gaps, steps: [step] }).steps[0].droppedFrames).toBe(0);
   });
 });

@@ -27,7 +27,9 @@ import {
   attemptPassed,
   gatePassed,
   judgeResponsiveness,
+  frameWorkRun,
   responsivenessLimits,
+  summarizeFrameWork,
   TIMING_ATTEMPTS,
 } from "./timeline-viewport-verdict.mjs";
 
@@ -39,6 +41,11 @@ const ROW_VIRTUALIZATION = process.env.TIMELINE_ROW_VIRTUALIZATION || "on";
 const EXPECTED_CHROME_MAJOR = process.env.TIMELINE_CHROME_MAJOR
   ? Number(process.env.TIMELINE_CHROME_MAJOR)
   : null;
+// Investigation knobs: a CPU throttle for any tier, and a lean Chrome trace of the first attempt's frame-work runs.
+const CPU_THROTTLE_RATE = Number(
+  process.env.TIMELINE_CPU_THROTTLE_RATE || (TIER === "low-resource" ? 4 : 1),
+);
+const TRACE_PATH = process.env.TIMELINE_TRACE_PATH;
 
 if (!STUDIO_URL) {
   console.error("STUDIO_URL is required and must point at the timeline-virtualization fixture");
@@ -47,12 +54,13 @@ if (!STUDIO_URL) {
 if (
   ![1_000, 50_000].includes(ELEMENT_COUNT) ||
   !["primary", "low-resource", "high-dpr", "ci"].includes(TIER) ||
-  !["off", "on"].includes(ROW_VIRTUALIZATION)
+  !["off", "on"].includes(ROW_VIRTUALIZATION) ||
+  !(CPU_THROTTLE_RATE >= 1)
 ) {
   console.error(
     "TIMELINE_ELEMENT_COUNT must be 1000 or 50000; " +
       "TIMELINE_TIER must be primary, low-resource, high-dpr, or ci; " +
-      "TIMELINE_ROW_VIRTUALIZATION must be off or on",
+      "TIMELINE_ROW_VIRTUALIZATION must be off or on; TIMELINE_CPU_THROTTLE_RATE must be 1 or more",
   );
   process.exit(2);
 }
@@ -169,6 +177,120 @@ async function collectRun(page, injectedLongTaskMs = 0) {
   }, injectedLongTaskMs);
 }
 
+/** Report-only, after the judged runs: the same steps, each booked until the timeline is quiet again. */
+async function collectFrameWorkRun(page) {
+  // Both functions run in the page; page.evaluate ships one function, so they travel joined as source.
+  return frameWorkRun(await page.evaluate(`(${measureFrameWorkInPage})(${startFrameSampler})`));
+}
+
+// A frame's work runs from its begin (the rAF timestamp) until the main thread is next idle, so style forced inside
+// rAF callbacks and React tasks queued after the paint count to it, and through it to the step.
+// Waiting for quiet would let Studio's 100 ms scroll-settled timer (TIMELINE_SCROLL_SETTLE_MS) fire and mount rich
+// clip content, which the judged runs never reach at 1x. A scroll event without a move every 50 ms keeps the
+// timeline scrolling, as a user mid-scroll does; its cost is booked to the step like any other work.
+async function measureFrameWorkInPage(startFrameSampler) {
+  const scroller = document.querySelector(
+    '[aria-label="Timeline track view"] [data-timeline-scroll-viewport]',
+  );
+  const ratios = [0, 0.25, 0.5, 0.75, 1, 0.5, 0];
+  const sampleCount = window.__studioTest.timelineViewportBudgets.scrollSamplesPerRun;
+  let lastScrollAt = -Infinity;
+  let keepAliveScrolls = 0;
+  const onScroll = () => {
+    lastScrollAt = performance.now();
+  };
+  scroller.addEventListener("scroll", onScroll, { passive: true });
+  const sampler = startFrameSampler(() => {
+    if (performance.now() - lastScrollAt <= 50) return;
+    keepAliveScrolls += 1;
+    scroller.dispatchEvent(new Event("scroll"));
+  });
+  const steps = [];
+  try {
+    await sampler.settle();
+    for (let index = 0; index < sampleCount; index += 1) {
+      const ratio = ratios[index % ratios.length];
+      const transition = `${ratios[(index + ratios.length - 1) % ratios.length]}->${ratio}`;
+      performance.mark(`step:${transition}`);
+      const started = performance.now();
+      keepAliveScrolls = 0;
+      const { scrollWidth, clientWidth, scrollHeight, clientHeight } = scroller;
+      scroller.scrollTo(
+        Math.round((scrollWidth - clientWidth) * ratio),
+        Math.round((scrollHeight - clientHeight) * ratio),
+      );
+      const assignMs = performance.now() - started;
+      const { frames, settled } = await sampler.settle();
+      performance.mark("step-end");
+      steps.push({ transition, settled, assignMs, frames, keepAliveScrolls });
+    }
+  } finally {
+    sampler.stop();
+    scroller.removeEventListener("scroll", onScroll);
+  }
+  return { gaps: sampler.gaps, steps };
+}
+
+// Frames from start to stop; onFrame runs first in each. A frame still open when the next one begins absorbs it,
+// so a long frame reads as its real length. settle() resolves once the frames since the call end in QUIET_FRAMES
+// frames under QUIET_FRAME_MS each, or after MAX_STEP_FRAMES animation frames.
+function startFrameSampler(onFrame) {
+  const QUIET_FRAME_MS = 4;
+  const QUIET_FRAMES = 2;
+  const MAX_STEP_FRAMES = 60;
+  const frames = [];
+  const gaps = [];
+  const noop = () => {};
+  let open = null;
+  let lastBegin = 0;
+  let stopped = false;
+  let check = noop;
+  const close = (frame) => {
+    if (frame === open) {
+      frame.end = performance.now();
+      open = null;
+    }
+    check();
+  };
+  const tick = (begin) => {
+    if (stopped) return;
+    requestAnimationFrame(tick);
+    onFrame();
+    const gap = begin - lastBegin;
+    gaps.push(gap);
+    lastBegin = begin;
+    if (!open) frames.push((open = { begin, end: null, gaps: [] }));
+    open.gaps.push(gap);
+    const frame = open;
+    requestIdleCallback(() => close(frame));
+    check();
+  };
+  requestAnimationFrame((begin) => {
+    lastBegin = begin;
+    requestAnimationFrame(tick);
+  });
+  const isQuiet = (frame) => frame.end !== null && frame.end - frame.begin < QUIET_FRAME_MS;
+  return {
+    gaps,
+    stop: () => {
+      stopped = true;
+    },
+    settle: () => {
+      const first = frames.length;
+      const firstGap = gaps.length;
+      return new Promise((resolve) => {
+        check = () => {
+          const own = frames.slice(first);
+          const settled = own.length >= QUIET_FRAMES && own.slice(-QUIET_FRAMES).every(isQuiet);
+          if (!settled && gaps.length - firstGap < MAX_STEP_FRAMES) return;
+          check = noop;
+          resolve({ frames: own.filter((frame) => frame.end !== null), settled });
+        };
+      });
+    },
+  };
+}
+
 async function assertLongTaskCapture(browser, longTaskLimitMs, scrollSamplesPerRun) {
   const page = await browser.newPage();
   const injectedDurationMs = longTaskLimitMs + 25;
@@ -247,8 +369,8 @@ try {
     deviceScaleFactor: TIER === "high-dpr" ? 2 : 1,
   });
   const client = await page.createCDPSession();
-  if (TIER === "low-resource") {
-    await client.send("Emulation.setCPUThrottlingRate", { rate: 4 });
+  if (CPU_THROTTLE_RATE !== 1) {
+    await client.send("Emulation.setCPUThrottlingRate", { rate: CPU_THROTTLE_RATE });
   }
   await page.goto(STUDIO_URL, { waitUntil: "networkidle0", timeout: 60_000 });
   await page.waitForFunction(
@@ -343,12 +465,29 @@ try {
       }),
       runs,
     };
+    // Measured after the judged runs, so the verdict above sees the same page it always did.
+    if (TRACE_PATH && attempts.length === 0) {
+      await page.tracing.start({
+        path: TRACE_PATH,
+        categories: ["devtools.timeline", "toplevel", "blink.user_timing"],
+      });
+    }
+    const frameWorkRuns = [];
+    for (let index = 0; index < budgets.measuredRuns; index += 1) {
+      frameWorkRuns.push(await collectFrameWorkRun(page));
+    }
+    if (TRACE_PATH && attempts.length === 0) await page.tracing.stop();
+    attempt.frameWork = { ...summarizeFrameWork(frameWorkRuns), measuredRuns: frameWorkRuns };
     attempts.push(attempt);
+    const work = attempt.frameWork;
     console.error(
       `timeline gate ${ROW_VIRTUALIZATION} attempt ${attempt.attempt}: ` +
         `interaction p95 ${attempt.interactionP95Ms.toFixed(1)}/${interactionLimitMs} ms, ` +
         `frame p95 ${attempt.frameIntervalP95Ms.toFixed(1)}/${frameIntervalLimitMs} ms, ` +
-        `${passingRuns}/${runs.length} runs passed, ${attempt.passed ? "PASS" : "FAIL"}`,
+        `${passingRuns}/${runs.length} runs passed, ${attempt.passed ? "PASS" : "FAIL"} | ` +
+        `frame work (report only) maxFrameWorkP95Ms=${work.maxFrameWorkP95Ms} ` +
+        `maxFrameWorkMs=${work.maxFrameWorkMs} droppedFrames=${work.droppedFrames} ` +
+        `maxStepDroppedFrames=${work.maxStepDroppedFrames} unsettledSteps=${work.unsettledSteps}`,
     );
   }
 
@@ -384,7 +523,7 @@ try {
       architecture: arch(),
       viewport: { width: 1440, height: 900 },
       deviceScaleFactor: TIER === "high-dpr" ? 2 : 1,
-      cpuThrottleRate: TIER === "low-resource" ? 4 : 1,
+      cpuThrottleRate: CPU_THROTTLE_RATE,
       tier: TIER,
       runtimeMode,
       longTaskObserverProbe,
