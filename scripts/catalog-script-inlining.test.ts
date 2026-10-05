@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -90,16 +90,53 @@ describe("glass-shard-title payload", () => {
   });
 });
 
-describe("module blocks' catalog import map", () => {
-  const vendorUrls = Object.fromEntries(
-    [
-      "gsap-3.14.2.min",
-      "three.core.min",
-      "three.module.min",
-      "RoomEnvironment",
-      "BufferGeometryUtils",
-    ].map((k) => [k, `https://cdn.example/${k}.js`]),
+const vendorUrls = Object.fromEntries(
+  ["gsap-3.14.2.min", "three-modules"].map((k) => [k, `https://cdn.example/${k}.js`]),
+);
+/** How a loader turns fetched code into a script URL; library code may build blob URLs for its own data. */
+const BLOB_SCRIPT = /\{type:"text\/javascript"\}/;
+const INLINED_BLOCKS = [
+  "code-slice-hero",
+  "cuboid-carousel",
+  "frost-sequence-camera-orbit",
+  "orbit-card",
+];
+
+function inlinedBlock(name: string): string {
+  const dir = join("registry/blocks", name);
+  return inlineCatalogScripts(
+    name,
+    readFileSync(join(dir, `${name}.html`), "utf-8"),
+    dir,
+    vendorUrls,
   );
+}
+
+// The docs host's CSP allows inline, eval'd and https: scripts but no blob: script, so a
+// preview whose libraries load from a blob: URL renders its empty base (code-slice-hero, 2026-10-05).
+describe("catalog payloads under the docs host's script policy", () => {
+  for (const name of INLINED_BLOCKS) {
+    it(`${name}: loads no script from a blob: URL`, () => {
+      assert.doesNotMatch(inlinedBlock(name), BLOB_SCRIPT);
+    });
+  }
+
+  it("no committed payload loads a script from a blob: URL", () => {
+    const root = "docs/public/catalog";
+    const payloads = readdirSync(root, { recursive: true, encoding: "utf-8" }).filter((f) =>
+      /^(blocks|components)\/[^/]+\.json$/.test(f),
+    );
+    assert.ok(payloads.length > 100);
+    const html = (f: string) =>
+      (JSON.parse(readFileSync(join(root, f), "utf-8")) as { html: string }).html;
+    assert.deepEqual(
+      payloads.filter((f) => BLOB_SCRIPT.test(html(f))),
+      [],
+    );
+  });
+});
+
+describe("module blocks' catalog import map", () => {
   it("frost: runs the script that drives frost after frost.js, not an earlier inline script", () => {
     const name = "frost-sequence-camera-orbit";
     const dir = join("registry/blocks", name);
@@ -116,19 +153,13 @@ describe("module blocks' catalog import map", () => {
   });
 
   for (const name of ["cuboid-carousel", "orbit-card"]) {
-    it(`${name}: maps every specifier its entry module imports, with no import map of its own left`, () => {
-      const dir = join("registry/blocks", name);
-      const html = readFileSync(join(dir, `${name}.html`), "utf-8");
-      const entry = html.slice(html.indexOf('<script type="module">'));
-      const imported = [...entry.matchAll(/^\s*import [^;]*? from "([^"]+)"/gm)].flatMap(
-        (m) => m[1] ?? [],
-      );
-      assert.ok(imported.length > 0);
-      const out = inlineCatalogScripts(name, html, dir, vendorUrls);
-      const mapped = /imports:\{(.*?)\}\}\);/.exec(out)?.[1] ?? "";
-      const keys = [...mapped.matchAll(/(?:^|,)"?([^",:]+)"?:/g)].map((m) => m[1]);
-      for (const spec of imported) assert.ok(keys.includes(spec), spec);
-      assert.doesNotMatch(out, /<script type="importmap">/);
+    it(`${name}: bundles its own modules and takes only three.js from the shared bundle`, () => {
+      const out = inlinedBlock(name);
+      const required = [...out.matchAll(/__require\(\\"([^"\\]+)\\"\)/g)].map((m) => m[1] ?? "");
+      assert.ok(required.length > 0);
+      for (const spec of required)
+        assert.match(spec, /^(three(\/addons\/.+)?|\.\/three\.module\.min\.js)$/);
+      assert.doesNotMatch(out, /<script type="(importmap|module)">/);
     });
   }
 });
