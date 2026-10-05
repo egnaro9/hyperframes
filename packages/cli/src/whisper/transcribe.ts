@@ -1,5 +1,5 @@
 // fallow-ignore-file complexity
-import { execFile, execFileSync } from "node:child_process";
+import { execFile, execFileSync, spawnSync } from "node:child_process";
 import { once } from "node:events";
 import { createInterface } from "node:readline";
 import type { Readable } from "node:stream";
@@ -422,6 +422,29 @@ export function dtwPresetForModel(model: string): string {
   return model.replace(/-/g, ".");
 }
 
+const acceptsNoFlashAttnByPath = new Map<string, boolean>();
+
+/** whisper.cpp's flash attention, on by default since it gained `--no-flash-attn`, silently turns `--dtw` off. */
+export function dtwArgs(whisperPath: string, model: string): string[] {
+  let acceptsNoFlashAttn = acceptsNoFlashAttnByPath.get(whisperPath);
+  if (acceptsNoFlashAttn === undefined) {
+    const help = spawnSync(whisperPath, ["--help"], { encoding: "utf-8", timeout: 10_000 });
+    acceptsNoFlashAttn = `${help.stdout}${help.stderr}`.includes("--no-flash-attn");
+    acceptsNoFlashAttnByPath.set(whisperPath, acceptsNoFlashAttn);
+  }
+  return ["--dtw", dtwPresetForModel(model), ...(acceptsNoFlashAttn ? ["--no-flash-attn"] : [])];
+}
+
+export function assertDtwTimed(segments: { tokens?: { t_dtw?: number }[] }[]): void {
+  const tokens = segments.flatMap((segment) => segment.tokens ?? []);
+  const timed = tokens.filter((token) => token.t_dtw !== undefined);
+  if (timed.length === 0 || timed.some((token) => (token.t_dtw ?? -1) > -1)) return;
+  throw new Error(
+    "whisper.cpp skipped word alignment (--dtw), so caption timing would drift. " +
+      "Its flash attention turns alignment off; update whisper-cli to a build that accepts --no-flash-attn.",
+  );
+}
+
 export function initialModelForLanguage(model: string, language?: string): string {
   const baseLanguage = language?.trim().toLowerCase().split(/[-_]/, 1)[0];
   if (baseLanguage && baseLanguage !== "en" && model.endsWith(".en")) {
@@ -504,8 +527,7 @@ export async function transcribe(
     "--output-json-full",
     "--output-file",
     outputBase,
-    "--dtw",
-    dtwPresetForModel(model),
+    ...dtwArgs(whisper.executablePath, model),
     "--suppress-nst",
   ];
   whisperArgs.push("--language", language);
@@ -589,6 +611,7 @@ export async function transcribe(
       // ignore
     }
   }
+  assertDtwTimed(segments);
 
   options?.onEvent?.({ type: "progress", phase: "transcription", model, status: "completed" });
   return {
