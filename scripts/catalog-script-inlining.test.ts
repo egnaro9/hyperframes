@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { runInNewContext } from "node:vm";
 import { inlineCatalogScripts, withHostedRefs } from "./catalog-script-inlining.ts";
 
 const CDN = "https://static.example.com/registry-assets";
@@ -72,6 +73,22 @@ describe("glass-shard-title payload", () => {
       const out = inlineCatalogScripts("glass-shard-title", html, dir, {});
       assert.ok(out.includes("window.GLASS = 1;"));
       assert.ok(!out.includes(scriptTag));
+    });
+  });
+
+  it("preserves script delimiters as data without exposing them to the HTML parser", () => {
+    withGlassMain((dir) => {
+      const value = "</script></ScRiPt><!--<script>\u2028\u2029";
+      writeFileSync(
+        join(dir, "assets/glass-main.js"),
+        `globalThis.payload = ${JSON.stringify(value)};`,
+      );
+      const out = inlineCatalogScripts("glass-shard-title", scriptTag, dir, {});
+      const body = out.slice("<script>".length, -"</script>".length);
+      assert.doesNotMatch(body, /[<\u2028\u2029]/);
+      const context: { payload?: string } = {};
+      runInNewContext(body, context);
+      assert.equal(context.payload, value);
     });
   });
 

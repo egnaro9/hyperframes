@@ -44,6 +44,22 @@ const SIMULATED_CURSOR_REASON =
 
 export const ALLOWED_DELETIONS = new Map([
   [
+    "docs/public/catalog/vendor/BufferGeometryUtils.json",
+    "bundled into three-modules.json so catalog scripts run under the docs host policy",
+  ],
+  [
+    "docs/public/catalog/vendor/RoomEnvironment.json",
+    "bundled into three-modules.json so catalog scripts run under the docs host policy",
+  ],
+  [
+    "docs/public/catalog/vendor/three.core.min.json",
+    "bundled into three-modules.json so catalog scripts run under the docs host policy",
+  ],
+  [
+    "docs/public/catalog/vendor/three.module.min.json",
+    "bundled into three-modules.json so catalog scripts run under the docs host policy",
+  ],
+  [
     "packages/studio/src/hooks/gsapTargetCache.ts",
     "its only caller was the deleted var-offset move writer; nothing imports isElementGsapTargeted",
   ],

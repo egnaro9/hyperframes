@@ -141,7 +141,10 @@ function classicBundle(
 
 /** A JS string literal safe to embed inside a `<script>` body. */
 function jsStringLiteral(text: string): string {
-  return JSON.stringify(text).replace(/<\/script/gi, "<\\/script");
+  return JSON.stringify(text)
+    .replaceAll("<", "\\u003c")
+    .replaceAll("\u2028", "\\u2028")
+    .replaceAll("\u2029", "\\u2029");
 }
 
 /** Looks up a vendor URL by key, throwing rather than silently generating a broken fetch. */
