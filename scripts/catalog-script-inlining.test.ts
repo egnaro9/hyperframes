@@ -153,7 +153,7 @@ describe("catalog payloads under the docs host's script policy", () => {
   });
 });
 
-describe("module blocks' catalog import map", () => {
+describe("module blocks' shared catalog bundle", () => {
   it("frost: runs the script that drives frost after frost.js, not an earlier inline script", () => {
     const name = "frost-sequence-camera-orbit";
     const dir = join("registry/blocks", name);

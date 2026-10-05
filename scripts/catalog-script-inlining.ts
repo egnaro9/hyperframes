@@ -1,5 +1,5 @@
 /** Inlines 3D-motion items' local scripts into their docs payload: the docs host's allowlist
- * (fonts/png/svg/json, hive/hfoss.md) 404s .js/.mjs/.hdr as hosted files, and its CSP runs
+ * (fonts/png/svg/json) 404s .js/.mjs/.hdr as hosted files, and its CSP runs
  * inline scripts but no blob: script, so every library runs as an inline <script>. */
 
 import { createHash } from "node:crypto";
@@ -10,7 +10,7 @@ import type { RegistryItem } from "../packages/core/src/index.js";
 import { hostedUrlByReference } from "./registry-hosted-assets.ts";
 
 interface VendorFile {
-  /** Stable key used both as the JSON filename and the import-map value lookup. */
+  /** Stable key used as the vendor JSON filename and bootstrap lookup. */
   key: string;
   /** repoRoot-relative path to read the canonical bytes from. */
   canonicalPath: string;
@@ -333,7 +333,7 @@ function inlineOrbitScripts(
   if (!gsapRe.test(html)) {
     throw new Error("catalog-script-inlining: orbit-card's gsap script tag not found.");
   }
-  // The bootstrap's import map replaces the block's own, which points at unhosted files.
+  // The classic bundle replaces the import map, whose targets are unhosted files.
   const { html: withoutImportmap } = extractAndRemoveScript(
     html,
     /<script type="importmap">/,
