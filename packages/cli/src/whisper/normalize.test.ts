@@ -538,6 +538,23 @@ describe("whisper-cpp DTW word timing", () => {
     ]);
   });
 
+  it("never inverts a drifted first word or starts the next one before it", () => {
+    const drifted = {
+      transcription: [
+        {
+          tokens: [
+            { text: " a", offsets: { from: 8800, to: 8970 }, t_dtw: 828 },
+            { text: " b", offsets: { from: 8900, to: 9000 }, t_dtw: 868 },
+          ],
+        },
+      ],
+    };
+    const { words } = loadTranscript(tmpFile("first.json", JSON.stringify(drifted)));
+    for (const word of words) expect(word.start).toBeLessThanOrEqual(word.end);
+    const starts = words.map((word) => word.start);
+    expect(starts).toEqual([...starts].sort((x, y) => x - y));
+  });
+
   it("keeps offset timing for tokens whisper.cpp did not align", () => {
     const unaligned = {
       transcription: [

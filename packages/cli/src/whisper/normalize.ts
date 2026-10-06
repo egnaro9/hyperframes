@@ -173,11 +173,13 @@ function parseWhisperCpp(data: Record<string, unknown>): Word[] {
       words.push({
         text,
         start:
-          dtw === undefined || !lastWord
+          dtw === undefined
             ? from
-            : from < dtw
-              ? Math.max(from, lastWord.end)
-              : lastWord.end,
+            : !lastWord
+              ? Math.min(from, dtw)
+              : from < dtw
+                ? Math.max(from, lastWord.end)
+                : lastWord.end,
         end: dtw ?? round3((token.offsets?.to ?? 0) / 1000),
       });
     }
