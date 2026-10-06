@@ -96,5 +96,5 @@ Use `hyperframes-cli` for command details
 
 - [ ] `npx hyperframes check` passes (0 findings across lint, runtime, layout, motion, and contrast)
 - [ ] Projects with sub-compositions: `npx hyperframes snapshot --at <midpoints>` and eyeball each frame
-- [ ] `npx hyperframes preview --background` for review (the user can edit anything in Studio's timeline, and the server survives the invoking command)
+- [ ] `npx hyperframes preview --background` for review (the user can edit anything in Studio's timeline, and the server survives the invoking command); under Claude Code, run it with `--foreground` as your session's own background task instead (see `/hyperframes-cli`)
 - [ ] `npx hyperframes render` only after the user approves

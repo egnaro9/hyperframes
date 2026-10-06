@@ -134,7 +134,7 @@ Choose proof times that show the opening state, signature move, and final hold. 
 Open Studio, then ask one question: “render now, or what changes?” After revisions, return to the same gate:
 
 ```bash
-(cd "$PROJECT_DIR" && npx hyperframes preview --background)
+(cd "$PROJECT_DIR" && npx hyperframes preview --background)   # under Claude Code, run it with `--foreground` as your session's own background task instead (see `/hyperframes-cli`)
 ```
 
 Render only after an explicit render answer:
