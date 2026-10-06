@@ -125,12 +125,21 @@ function interpolateZeroDuration(words: Word[]): void {
   }
 }
 
+const PUNCTUATION_TOKEN = /^[.,!?;:'")\]}>…–—¡¿-]+$/;
+
+/** A token's DTW time in seconds (whisper.cpp's `t_dtw`, in 10 ms units, marks where the token
+ *  ends), or undefined when whisper.cpp did not align it (-1). */
+function dtwEnd(token: { t_dtw?: number }): number | undefined {
+  return token.t_dtw !== undefined && token.t_dtw >= 0 ? round3(token.t_dtw / 100) : undefined;
+}
+
 function parseWhisperCpp(data: Record<string, unknown>): Word[] {
   const words: Word[] = [];
   const transcription = data.transcription as Array<{
     tokens?: Array<{
       text?: string;
       offsets?: { from?: number; to?: number };
+      t_dtw?: number;
     }>;
   }>;
 
@@ -145,21 +154,25 @@ function parseWhisperCpp(data: Record<string, unknown>): Word[] {
       // Merge into previous word when the token is a sub-word continuation,
       // trailing punctuation, or a contraction suffix.
       // Whisper uses leading spaces to mark word boundaries in all languages.
+      const isPunctuation = PUNCTUATION_TOKEN.test(text);
       const shouldMerge =
         lastWord &&
-        (!rawText.startsWith(" ") ||
-          /^[.,!?;:'")\]}>…–—¡¿-]+$/.test(text) ||
-          /^'(t|m|s|ve|re|ll|d)$/i.test(text));
+        (!rawText.startsWith(" ") || isPunctuation || /^'(t|m|s|ve|re|ll|d)$/i.test(text));
+      // A DTW-aligned word ends at its last spoken token: a punctuation token's DTW time can sit
+      // inside the pause that follows, and its start never reaches back before the previous word ends.
+      const dtw = dtwEnd(token);
       if (shouldMerge) {
         lastWord.text += text;
-        lastWord.end = round3((token.offsets?.to ?? 0) / 1000);
+        if (dtw === undefined) lastWord.end = round3((token.offsets?.to ?? 0) / 1000);
+        else if (!isPunctuation) lastWord.end = dtw;
         continue;
       }
 
+      const from = round3((token.offsets?.from ?? 0) / 1000);
       words.push({
         text,
-        start: round3((token.offsets?.from ?? 0) / 1000),
-        end: round3((token.offsets?.to ?? 0) / 1000),
+        start: dtw !== undefined && lastWord ? Math.max(from, lastWord.end) : from,
+        end: dtw ?? round3((token.offsets?.to ?? 0) / 1000),
       });
     }
   }
