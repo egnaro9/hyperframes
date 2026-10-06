@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -7,6 +7,7 @@ import { transcribe, type TranscribeProgress } from "./transcribe.js";
 const native = vi.hoisted(() => ({
   exec: vi.fn(),
   missingLanguage: false,
+  dtw: undefined as number | undefined,
   runtime: vi.fn(),
   printed: { stdout: "", stderr: "" },
 }));
@@ -14,7 +15,10 @@ vi.mock("node:child_process", async () => {
   const { PassThrough } = await import("node:stream");
   return {
     execFileSync: native.exec,
-    spawnSync: () => ({ stdout: "", stderr: "" }),
+    spawnSync: () => ({
+      stdout: "  -nfa, --no-flash-attn [false] disable flash attention",
+      stderr: "",
+    }),
     // whisper-cli: runs the same stand-in, then prints what the test set, as the real one does while it decodes.
     execFile: (
       command: string,
@@ -61,6 +65,7 @@ beforeEach(() => {
   writeFileSync(join(dir, "audio.wav"), Buffer.alloc(44));
   native.missingLanguage = false;
   native.printed = { stdout: "", stderr: "" };
+  native.dtw = undefined;
   native.runtime.mockReset().mockResolvedValue({ executablePath: "whisper-cli", source: "env" });
   native.exec.mockReset().mockImplementation((command: string, args: string[]) => {
     if (command === "ffprobe")
@@ -82,7 +87,11 @@ beforeEach(() => {
         transcription: [
           {
             tokens: [
-              { text: language === "es" ? "Hola" : "Hello", offsets: { from: 0, to: 1000 } },
+              {
+                text: language === "es" ? "Hola" : "Hello",
+                offsets: { from: 0, to: 1000 },
+                ...(native.dtw === undefined ? {} : { t_dtw: native.dtw }),
+              },
             ],
           },
         ],
@@ -266,4 +275,16 @@ it("names the timeout knob when whisper outlives its own timeout", async () => {
   await expect(transcribe(join(dir, "audio.wav"), dir, { model: "small" })).rejects.toThrow(
     "Whisper transcription exceeded",
   );
+});
+it("asks whisper-cli for word alignment with flash attention off", async () => {
+  await transcribe(join(dir, "audio.wav"), dir, { model: "small.en" });
+  const [, args] = native.exec.mock.calls.find(([command]) => command === "whisper-cli")!;
+  expect(args).toEqual(expect.arrayContaining(["--dtw", "small.en", "--no-flash-attn"]));
+});
+it("refuses a transcript whisper-cli left unaligned and leaves no file behind to caption from", async () => {
+  native.dtw = -1;
+  await expect(transcribe(join(dir, "audio.wav"), dir, { model: "small.en" })).rejects.toThrow(
+    /skipped word alignment/,
+  );
+  expect(existsSync(join(dir, "transcript.json"))).toBe(false);
 });

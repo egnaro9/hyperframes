@@ -611,7 +611,13 @@ export async function transcribe(
       // ignore
     }
   }
-  assertDtwTimed(segments);
+  try {
+    assertDtwTimed(segments);
+  } catch (err) {
+    // `init` captions from whatever transcript.json is on disk, even after transcription fails.
+    rmSync(transcriptPath, { force: true });
+    throw err;
+  }
 
   options?.onEvent?.({ type: "progress", phase: "transcription", model, status: "completed" });
   return {

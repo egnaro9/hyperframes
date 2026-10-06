@@ -519,6 +519,25 @@ describe("whisper-cpp DTW word timing", () => {
     ]);
   });
 
+  it("starts a word at the previous word's end when its offset start drifted past its DTW end", () => {
+    // From the same clip repeated to 51 s: past the first window, offsets run late.
+    const drifted = {
+      transcription: [
+        {
+          tokens: [
+            { text: " green", offsets: { from: 7880, to: 8300 }, t_dtw: 828 },
+            { text: " forest", offsets: { from: 8800, to: 8970 }, t_dtw: 868 },
+          ],
+        },
+      ],
+    };
+    const { words } = loadTranscript(tmpFile("drifted.json", JSON.stringify(drifted)));
+    expect(words.map(({ start, end }) => [start, end])).toEqual([
+      [7.88, 8.28],
+      [8.28, 8.68],
+    ]);
+  });
+
   it("keeps offset timing for tokens whisper.cpp did not align", () => {
     const unaligned = {
       transcription: [

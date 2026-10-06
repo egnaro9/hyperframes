@@ -159,7 +159,8 @@ function parseWhisperCpp(data: Record<string, unknown>): Word[] {
         lastWord &&
         (!rawText.startsWith(" ") || isPunctuation || /^'(t|m|s|ve|re|ll|d)$/i.test(text));
       // A DTW-aligned word ends at its last spoken token: a punctuation token's DTW time can sit
-      // inside the pause that follows, and its start never reaches back before the previous word ends.
+      // inside the pause that follows. It starts no earlier than the previous word ends, and past
+      // the first 30 s window its offset start can drift beyond its own end, so then it starts there.
       const dtw = dtwEnd(token);
       if (shouldMerge) {
         lastWord.text += text;
@@ -171,7 +172,12 @@ function parseWhisperCpp(data: Record<string, unknown>): Word[] {
       const from = round3((token.offsets?.from ?? 0) / 1000);
       words.push({
         text,
-        start: dtw !== undefined && lastWord ? Math.max(from, lastWord.end) : from,
+        start:
+          dtw === undefined || !lastWord
+            ? from
+            : from < dtw
+              ? Math.max(from, lastWord.end)
+              : lastWord.end,
         end: dtw ?? round3((token.offsets?.to ?? 0) / 1000),
       });
     }
