@@ -1,6 +1,6 @@
 import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import { readdirSync, type Dirent } from "node:fs";
-import { realpath, resolveWithinProject } from "@hyperframes/core/safe-path";
+import { realpath, resolveWithinProject as resolveInProject } from "@hyperframes/core/safe-path";
 
 // `isSafePath` lives at the package root so non-studio-api layers (compiler,
 // CLI, engine) can share it without a backwards dependency on studio-api.
@@ -12,8 +12,13 @@ export {
   mkdirWithinProject,
   realpath,
   realProjectRoot,
-  resolveWithinProject,
 } from "@hyperframes/core/safe-path";
+
+/** Core's `resolveWithinProject`, closed to `.hyperframes/` for every route a request path reaches (isPrivateProjectFile). */
+export function resolveWithinProject(base: string, relativePath: string): string | null {
+  const resolved = resolveInProject(base, relativePath);
+  return resolved && !isPrivateProjectFile(base, resolved) ? resolved : null;
+}
 
 /** The real path; for a path not there (yet, or any more), the nearest existing folder's real path plus the rest. */
 export function realFilePath(filePath: string): string {

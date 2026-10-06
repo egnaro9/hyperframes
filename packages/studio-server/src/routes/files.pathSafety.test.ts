@@ -746,3 +746,33 @@ describe("the desktop app link's private files", () => {
     );
   });
 });
+
+describe("routes that write a path from the request", () => {
+  it("never plant or copy a file into .hyperframes/", async () => {
+    const { app, project } = fixture();
+    mkdirSync(join(project, ".hyperframes"));
+    writeFileSync(join(project, ".hyperframes", "agent-link.json"), '{"relay":{"token":"secret"}}');
+    const rename = await app.request("/projects/p/files/inside.txt", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ newPath: ".hyperframes/app-tools.json" }),
+    });
+    expect(rename.status).toBeGreaterThanOrEqual(400);
+    expect(existsSync(join(project, ".hyperframes", "app-tools.json"))).toBe(false);
+    const duplicate = await app.request("/projects/p/duplicate-file", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path: ".hyperframes/agent-link.json" }),
+    });
+    expect(duplicate.status).toBeGreaterThanOrEqual(400);
+    expect(readdirSync(join(project, ".hyperframes"))).toEqual(["agent-link.json"]);
+    const form = new FormData();
+    form.append("file", new File(['{"url":"http://x/mcp/image/k","token":"t"}'], "app-tools.json"));
+    const upload = await app.request("/projects/p/upload?dir=.hyperframes", {
+      method: "POST",
+      body: form,
+    });
+    expect(upload.status).toBeGreaterThanOrEqual(400);
+    expect(existsSync(join(project, ".hyperframes", "app-tools.json"))).toBe(false);
+  });
+});

@@ -29,7 +29,6 @@ import { validateUploadedMediaBuffer } from "../helpers/mediaValidation.js";
 import {
   folderGone,
   isInHiddenOrVendorDir,
-  isPrivateProjectFile,
   isSafePath,
   mkdirWithinProject,
   pinWithinProject,
@@ -226,10 +225,6 @@ async function resolveProjectPath(
       return { error: c.json({ error: "not found", why: "dangling_symlink" }, 404) } as const;
     }
     return { error: c.json({ error: "forbidden", why: "outside_project" }, 403) } as const;
-  }
-
-  if (isPrivateProjectFile(project.dir, absPath)) {
-    return { error: c.json({ error: "forbidden", why: "private" }, 403) } as const;
   }
 
   if (opts?.mustExist && !existsSync(absPath)) {
