@@ -14,6 +14,7 @@ vi.mock("node:child_process", async () => {
   const { PassThrough } = await import("node:stream");
   return {
     execFileSync: native.exec,
+    spawnSync: () => ({ stdout: "", stderr: "" }),
     // whisper-cli: runs the same stand-in, then prints what the test set, as the real one does while it decodes.
     execFile: (
       command: string,
