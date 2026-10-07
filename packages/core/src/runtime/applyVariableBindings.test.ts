@@ -136,6 +136,32 @@ describe("applyVariableBindings", () => {
     expect(document.querySelector("#b h1")?.textContent).toBe("Bravo");
   });
 
+  it("gives an inline-template instance its host's values", () => {
+    win.__hfVariablesByComp = { "card-1": { title: "One" } };
+    document.body.innerHTML = `
+      <div data-hf-root data-composition-id="main">
+        <div data-composition-id="card-1"><div data-composition-id="card-root"><h1 data-var-text="title">Default</h1></div></div>
+      </div>`;
+    applyVariableBindings(document);
+    expect(document.querySelector("h1")?.textContent).toBe("One");
+  });
+
+  it("keeps a nested host's own values, and binds src per instance", () => {
+    win.__hfVariablesByComp = {
+      outer: { title: "Outer" },
+      inner: { title: "Inner", hero: "inner.png" },
+    };
+    document.body.innerHTML = `
+      <div data-hf-root data-composition-id="main">
+        <div data-composition-src="outer.html" data-composition-id="outer">
+          <div data-composition-id="inner"><h1 data-var-text="title">Default</h1><img data-var-src="hero" src="x.png" /></div>
+        </div>
+      </div>`;
+    applyVariableBindings(document);
+    expect(document.querySelector("h1")?.textContent).toBe("Inner");
+    expect(document.querySelector("img")?.getAttribute("src")).toBe("inner.png");
+  });
+
   describe("security", () => {
     it("refuses data-var-src on a non-media tag (XSS sink)", () => {
       win.__hfVariables = { evil: "javascript:alert(document.cookie)" };
