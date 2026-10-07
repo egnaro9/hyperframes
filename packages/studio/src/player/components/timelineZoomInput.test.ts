@@ -120,7 +120,7 @@ describe("requestTimelineZoom", () => {
   it("lays a zoom-out about the left edge out at once, before it shows unmounted time", () => {
     usePlayerStore.setState({ duration: 1000 });
     viewport();
-    // Mounted to (1080 - 32 + 540) / 10 = 158.8 s; at 5 px/s the view reaches 209.6 s.
+    // Mounted to (1080 - 32 + 270) / 10 = 131.8 s; at 5 px/s the view reaches 209.6 s.
     requestTimelineZoom(50, { time: 0, x: 32 });
     vi.advanceTimersToNextFrame();
     expect(usePlayerStore.getState().timelinePps).toBe(5);
@@ -134,14 +134,14 @@ describe("requestTimelineZoom", () => {
       timelinePps: 100,
     });
     viewport(5000);
-    // Mounted 44.28..65.88 s; at 60 px/s about 55.24 s the view shows 46.5..63.97 s.
-    requestTimelineZoom(600, { time: 55.24, x: 556 });
+    // Mounted 46.98..63.18 s; at 70 px/s about 55.24 s the view shows 47.75..62.73 s.
+    requestTimelineZoom(700, { time: 55.24, x: 556 });
     vi.advanceTimersToNextFrame();
     expect(usePlayerStore.getState().timelinePps).toBe(100);
   });
 
   it("lays out a zoom-out before it shows past the window ruler ticks are drawn in", () => {
-    // 50 s of clips in content 1996 s wide: ticks are drawn to 157 s, a view and a half in.
+    // 50 s of clips in content 1996 s wide: ticks are drawn to 131.8 s, a view and a quarter in.
     usePlayerStore.setState({ duration: 50 });
     viewport();
     requestTimelineZoom(60, { time: 0, x: 32 });
