@@ -1205,7 +1205,7 @@ class Engine {
     const paths = entries.flatMap((entry) => entry.unavailableBefore ?? []);
     if (paths.length)
       throw new Error(
-        `Cannot restore ${paths.join(", ")}: the original media version is unavailable because its first archive did not complete before the file changed.`,
+        `Cannot restore ${paths.join(", ")}: the original media version is unavailable in this history.`,
       );
   }
 

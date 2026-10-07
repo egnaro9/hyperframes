@@ -24,7 +24,7 @@ export interface HistoryEntry {
   startedAt: number;
   endedAt: number;
   files: HistoryFileChange[];
-  /** These files existed before this entry, but their original bytes were never archived. */
+  /** These files existed before this entry, but their original archived version was not established. */
   unavailableBefore?: string[];
   /** Set on an undo: the entry it reverted. Redo is undoing the undo. */
   undoes?: string;
