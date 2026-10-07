@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { runCommand } from "citty";
+import { parseHTML } from "linkedom";
 import { describe, expect, it, vi } from "vitest";
 import {
   HF_COLOR_GRADING_ACTIVE_EFFECT_KEYS,
@@ -421,6 +422,38 @@ describe("applyMediaTreatmentToHtml", () => {
         grading: { effects: { dithering: 1 } },
       }),
     ).toThrow(/effects.*dithering/i);
+  });
+
+  it("previews the exact grading attribute and lint verdict without --apply or writes", async () => {
+    const project = mkdtempSync(join(tmpdir(), "hf-media-dry-run-"));
+    const file = join(project, "index.html");
+    const grading = '{"preset":"warm-daylight","intensity":0.8}';
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    writeFileSync(file, VIDEO);
+    const args = ["--project", project, "--selector", "#hero", "--grading", grading, "--json"];
+    try {
+      await runCommand(mediaTreatmentCommand, { rawArgs: [...args, "--dry-run"] });
+      const preview = JSON.parse(String(log.mock.calls.at(-1)?.[0]));
+      expect(preview).toMatchObject({
+        ok: true,
+        dryRun: true,
+        changed: true,
+        attribute: "data-color-grading",
+        lint: { ok: true, findings: [] },
+      });
+      expect(readFileSync(file, "utf8")).toBe(VIDEO);
+      await runCommand(mediaTreatmentCommand, { rawArgs: [...args, "--apply"] });
+      const applied = JSON.parse(String(log.mock.calls.at(-1)?.[0]));
+      const written = parseHTML(readFileSync(file, "utf8"))
+        .document.querySelector("#hero")
+        ?.getAttribute("data-color-grading");
+      expect(preview.value).toBe(written);
+      expect(preview.value).toBe(applied.value);
+      expect(preview.lint).toEqual(applied.lint);
+    } finally {
+      log.mockRestore();
+      rmSync(project, { recursive: true, force: true });
+    }
   });
 
   it("requires --apply for --grading while keeping --clear explicit", async () => {

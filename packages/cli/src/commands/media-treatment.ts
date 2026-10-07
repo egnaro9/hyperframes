@@ -21,6 +21,7 @@ import {
 import { rewriteAssetPath } from "@hyperframes/parsers/asset-paths";
 import { patchElementInHtml } from "@hyperframes/studio-server/source-mutation";
 import { defineCommand } from "citty";
+import { lintHyperframeHtml } from "@hyperframes/lint";
 import { parseHTML } from "linkedom";
 import type { Example } from "./_examples.js";
 import { c } from "../ui/colors.js";
@@ -318,7 +319,7 @@ export const examples: Example[] = [
   ],
   [
     "Preview the exact mutation without writing",
-    `hyperframes media-treatment --file compositions/scene.html --selector 'video' --grading '{"preset":"warm-daylight"}' --apply --dry-run --json`,
+    `hyperframes media-treatment --file compositions/scene.html --selector 'video' --grading '{"preset":"warm-daylight"}' --dry-run --json`,
   ],
   [
     "Measure one local media source before choosing a correction",
@@ -524,15 +525,20 @@ export function resolveMediaTreatmentSource(
   return asset.resolved;
 }
 
-function parseGrading(raw: string | undefined, apply: boolean, clear: boolean): unknown {
+function parseGrading(
+  raw: string | undefined,
+  apply: boolean,
+  clear: boolean,
+  dryRun: boolean,
+): unknown {
   if (clear) {
     if (raw !== undefined || apply) {
       throw new Error("Use either --apply with --grading or --clear, not both");
     }
     return undefined;
   }
-  if (!apply) {
-    if (raw !== undefined) throw new Error("--grading requires --apply");
+  if (!apply && !dryRun) {
+    if (raw !== undefined) throw new Error("--grading requires --apply or --dry-run");
     throw new Error("Use --apply with --grading <json> or --clear");
   }
   if (raw === undefined) throw new Error("--apply requires --grading <json>");
@@ -629,20 +635,23 @@ function analyzeTarget(args: MediaTreatmentCommandArgs) {
   };
 }
 
-function prepareMutation(args: MediaTreatmentCommandArgs) {
+async function prepareMutation(args: MediaTreatmentCommandArgs) {
   const { project, filePath } = resolveMutationFile(args);
   const selector = readOptionalString(args.selector);
   if (!selector) throw new Error("--selector is required");
   const clear = args.clear === true;
   const apply = args.apply === true;
+  const dryRun = args["dry-run"] === true;
   const selectorIndex = parseSelectorIndex(readOptionalString(args["selector-index"]));
   const result = applyMediaTreatmentToHtml(readFileSync(filePath, "utf8"), {
     selector,
     selectorIndex,
-    grading: parseGrading(readOptionalString(args.grading), apply, clear),
+    grading: parseGrading(readOptionalString(args.grading), apply, clear, dryRun),
     clear,
   });
-  const dryRun = args["dry-run"] === true;
+  const lintResult = await lintHyperframeHtml(result.html);
+  const findings = lintResult.findings.filter(({ code }) => code.startsWith("color_grading_"));
+  const lint = { ok: findings.every(({ severity }) => severity !== "error"), findings };
   if (result.changed && !dryRun) writeFileSync(filePath, result.html);
 
   const action: "clear" | "apply" = result.value === null ? "clear" : "apply";
@@ -661,6 +670,9 @@ function prepareMutation(args: MediaTreatmentCommandArgs) {
       dryRun,
       before: result.before,
       after: result.after,
+      attribute: HF_COLOR_GRADING_ATTR,
+      value: result.value,
+      lint,
     },
   };
 }
@@ -683,8 +695,8 @@ function printAnalysis(args: MediaTreatmentCommandArgs): void {
   console.log(`   suggested patch: ${JSON.stringify(result.suggestedPatch)}`);
 }
 
-function printMutation(args: MediaTreatmentCommandArgs): void {
-  const { action, result, selector, payload } = prepareMutation(args);
+async function printMutation(args: MediaTreatmentCommandArgs): Promise<void> {
+  const { action, result, selector, payload } = await prepareMutation(args);
   if (args.json === true) {
     console.log(JSON.stringify(withMeta(payload), null, 2));
     return;
@@ -747,19 +759,20 @@ export const mediaTreatmentCommand = defineCommand({
     clear: { type: "boolean", description: "Remove color grading from the target", default: false },
     "dry-run": {
       type: "boolean",
-      description: "Validate and report without writing",
+      description:
+        "Preview the normalized grading attribute and color-grading lint verdict without writing",
       default: false,
     },
     json: { type: "boolean", description: "Output an agent-friendly JSON result", default: false },
   },
-  run({ args }) {
+  async run({ args }) {
     try {
       if (isCapabilityQuery(args)) return runCapabilityQuery(args);
       if (args.analyze === true) {
         printAnalysis(args);
         return;
       }
-      printMutation(args);
+      await printMutation(args);
     } catch (error) {
       printFailure(error, args.json === true);
     }
