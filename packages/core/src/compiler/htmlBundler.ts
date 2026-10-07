@@ -26,6 +26,7 @@ import { AsyncLocalStorage } from "async_hooks";
 import { readFileSync, existsSync, statSync } from "fs";
 import { resolve, relative, dirname, isAbsolute, sep } from "path";
 import {
+  decodeCssEscapes,
   decodeWellFormedEscapes,
   encodeUrlPath,
   decodedUrlPath,
@@ -144,8 +145,9 @@ function rebaseCssUrls(css: string, cssFileDir: string, projectDir: string): str
   const resolvedDir = resolve(cssFileDir);
   if (resolvedDir === resolvedRoot) return css;
   return css.replace(CSS_URL_RE, (full, quote: string, urlValue: string) => {
-    if (!urlValue || !isRelativeUrl(urlValue)) return full;
-    const { basePath, suffix } = splitUrlSuffix(urlValue.trim());
+    const decoded = decodeCssEscapes(urlValue).trim();
+    if (!decoded || !isRelativeUrl(decoded)) return full;
+    const { basePath, suffix } = splitUrlSuffix(decoded);
     if (!basePath) return full;
     const absolutePath = resolve(resolvedDir, decodeWellFormedEscapes(basePath));
     const rebased = encodeUrlPath(relative(resolvedRoot, absolutePath).split(sep).join("/"));

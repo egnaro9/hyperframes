@@ -33,3 +33,14 @@ export function encodeUrlPath(path: string): string {
     .replace(/%2F/g, "/")
     .replace(/['()]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
 }
+
+export function decodeCssEscapes(text: string): string {
+  return text.replace(
+    /\\(?:([0-9a-f]{1,6})[ \t\r\n\f]?|([\s\S]))/gi,
+    (escaped, hex: string | undefined, char: string | undefined) => {
+      if (hex === undefined) return char!;
+      const code = Number.parseInt(hex, 16);
+      return code <= 0x10ffff ? String.fromCodePoint(code) : escaped;
+    },
+  );
+}

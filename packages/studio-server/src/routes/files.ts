@@ -3,7 +3,7 @@
 // parallel — two writers, same switch-case interface. Structural duplication
 // is load-bearing (both paths must remain testable in isolation).
 import type { Hono } from "hono";
-import { encodeUrlPath, decodedUrlPath } from "@hyperframes/parsers/asset-paths";
+import { encodeUrlPath, decodedUrlPath, decodeCssEscapes } from "@hyperframes/parsers/asset-paths";
 import {
   scanHtmlOpeningTags,
   decodeAuthoredAttribute,
@@ -794,16 +794,7 @@ function referenceSyntax(file: string): ReferenceSyntax {
 }
 
 function decodeQuotedReference(text: string, syntax: ReferenceSyntax): string {
-  if (syntax === "css") {
-    return text.replace(
-      /\\(?:([0-9a-f]{1,6})[ \t\r\n\f]?|([\s\S]))/gi,
-      (escaped, hex: string | undefined, char: string | undefined) => {
-        if (hex === undefined) return char!;
-        const code = Number.parseInt(hex, 16);
-        return code <= 0x10ffff ? String.fromCodePoint(code) : escaped;
-      },
-    );
-  }
+  if (syntax === "css") return decodeCssEscapes(text);
   if (syntax === "script") {
     const controls: Record<string, string> = { b: "\b", f: "\f", n: "\n", r: "\r", t: "\t" };
     return text.replace(

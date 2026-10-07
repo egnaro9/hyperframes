@@ -45,6 +45,7 @@ export function isPathInside(childPath: string, parentPath: string): boolean {
 }
 
 export {
+  decodeCssEscapes,
   decodeWellFormedEscapes,
   decodedUrlPath,
   splitUrlSuffix,

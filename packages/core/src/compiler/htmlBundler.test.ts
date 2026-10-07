@@ -1834,6 +1834,19 @@ describe("bundleToSingleHtml", () => {
     expect(bundled).not.toContain("url('./images/grain.png')");
   });
 
+  it("decodes CSS escapes before rebasing linked stylesheet asset URLs", async () => {
+    const dir = makeTempProject({
+      "index.html": `<link rel="stylesheet" href="css/theme.css"><div data-composition-id="root" data-width="320" data-height="180"></div>`,
+      "css/theme.css": String.raw`.bg { background: url(icon\ 1.png); }`,
+      "css/icon 1.png": "escaped-space-image",
+    });
+
+    const linked = await bundleToSingleHtml(dir, { inlineAssets: false });
+    expect(styleText(linked)).toContain("url(css/icon%201.png)");
+    const inlined = await bundleToSingleHtml(dir);
+    expect(styleText(inlined)).toContain(inlinedAs("image/png", "escaped-space-image"));
+  });
+
   it("rebases url() paths with ../ traversal in nested @import", async () => {
     const dir = makeTempProject({
       "index.html": `<!doctype html>
