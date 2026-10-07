@@ -1,16 +1,39 @@
 import { fetchMedia } from "../../../scripts/lib/media-fetch.mjs";
 // heygen.mjs — vendored HeyGen REST helpers (auth + transport) for the audio
 // pipeline. The credential resolver matches the hyperframes CLI auth: first
-// usable source wins — a host-injected OAuth $HEYGEN_ACCESS_TOKEN (Bearer) →
+// usable source wins — a host gateway ($HEYGEN_API_BASE with its own
+// $HEYGEN_API_KEY) → a host-injected OAuth $HEYGEN_ACCESS_TOKEN (Bearer) →
 // $HEYGEN_API_KEY / $HYPERFRAMES_API_KEY → a nearby .env → ~/.heygen/
 // credentials (oauth → Bearer, else api_key → X-Api-Key; $HEYGEN_CONFIG_DIR
-// overrides the dir). Vendored so the skill ships standalone. Pure node.
+// overrides the dir). $HEYGEN_API_BASE moves every request to that host, as it
+// does for the heygen CLI; plain HTTP needs $HEYGEN_ALLOW_HTTP=1, as there.
+// Vendored so the skill ships standalone. Pure node.
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
 export const HEYGEN_BASE = "https://api.heygen.com/v3";
+
+// The v3 base every request goes to: $HEYGEN_API_BASE when a host app names its own gateway (HyperFrames Desktop
+// forwards it to HeyGen with the API key saved in its Settings), else HeyGen's public API. Plain HTTP carries the key
+// in the clear, so it needs $HEYGEN_ALLOW_HTTP=1, the heygen CLI's own rule.
+export function heygenBase() {
+  const host = process.env.HEYGEN_API_BASE?.trim().replace(/\/+$/, "");
+  if (!host) return HEYGEN_BASE;
+  if (host.startsWith("http://") && process.env.HEYGEN_ALLOW_HTTP !== "1")
+    throw new Error(
+      `HEYGEN_API_BASE (${host}) uses HTTP, which sends the key in plaintext. Set HEYGEN_ALLOW_HTTP=1 to allow it.`,
+    );
+  return `${host}/v3`;
+}
+
+// A host gateway: the host named its own API base and the key that base accepts. It pays for every call, so it wins
+// over any other credential the environment carries.
+const hostGatewayKey = () =>
+  process.env.HEYGEN_API_BASE?.trim() && process.env.HEYGEN_API_KEY
+    ? process.env.HEYGEN_API_KEY
+    : null;
 export const HEYGEN_CLI_SOURCE_HEADERS = { "X-HeyGen-Source": "cli" };
 // Tool-attribution sent on EVERY media-use HeyGen call regardless of auth type, so
 // the backend can isolate media-use consumption from other free TTS / avatar video.
@@ -68,6 +91,8 @@ export function heygenCredential() {
 // (a folder, a locked ~/.heygen), so heygenAuthHeaders can say to fix that path: logging in again would fail there too.
 // Read without checking first, so the file cannot change between a check and the read.
 function resolveCredential() {
+  const gatewayKey = hostGatewayKey();
+  if (gatewayKey) return { headers: { "X-Api-Key": gatewayKey } };
   const accessToken = process.env.HEYGEN_ACCESS_TOKEN;
   if (accessToken) return { headers: { Authorization: `Bearer ${accessToken}` } };
   const envKey = process.env.HEYGEN_API_KEY || process.env.HYPERFRAMES_API_KEY;
@@ -144,7 +169,7 @@ export async function heygenJSON(path, { method = "GET", headers = {}, body } = 
     opts.headers["Content-Type"] = "application/json";
     opts.body = JSON.stringify(body);
   }
-  const res = await fetch(`${HEYGEN_BASE}${path}`, opts);
+  const res = await fetch(`${heygenBase()}${path}`, opts);
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
     const message = `HeyGen ${method} ${path} → HTTP ${res.status}${detail ? `\n${detail.slice(0, 300)}` : ""}`;
