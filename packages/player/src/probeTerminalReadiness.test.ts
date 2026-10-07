@@ -24,6 +24,22 @@ function sendTimeline(iframe: HTMLIFrameElement) {
   );
 }
 
+function keepDocument(iframe: HTMLIFrameElement, doc: Document | null) {
+  Object.defineProperty(iframe, "contentDocument", { configurable: true, get: () => doc });
+}
+
+function expectUnready(player: HyperframesPlayer, onReady: ReturnType<typeof vi.fn>) {
+  expect(onReady).not.toHaveBeenCalled();
+  expect(player.ready).toBe(false);
+  expect(player.duration).toBe(0);
+}
+
+function expectTimelineReady(player: HyperframesPlayer, onReady: ReturnType<typeof vi.fn>) {
+  expect(onReady).toHaveBeenCalledOnce();
+  expect(player.ready).toBe(true);
+  expect(player.duration).toBe(9);
+}
+
 describe("terminal probe readiness", () => {
   beforeEach(async () => {
     await import("./hyperframes-player.js");
@@ -41,49 +57,32 @@ describe("terminal probe readiness", () => {
     expect(onError).toHaveBeenCalledOnce();
     vi.advanceTimersByTime(1000);
     sendTimeline(iframe);
-    expect(onReady).not.toHaveBeenCalled();
-    expect(player.ready).toBe(false);
-    expect(player.duration).toBe(0);
+    expectUnready(player, onReady);
   });
 
   it("rejects the failed document while its replacement is still navigating", () => {
     const { player, iframe, onReady } = mountPlayer();
     vi.advanceTimersByTime(8000);
-    const failedDocument = iframe.contentDocument;
-    Object.defineProperty(iframe, "contentDocument", {
-      configurable: true,
-      get: () => failedDocument,
-    });
+    keepDocument(iframe, iframe.contentDocument);
     player.setAttribute("src", "next.html");
     sendTimeline(iframe);
-    expect(onReady).not.toHaveBeenCalled();
-    expect(player.ready).toBe(false);
-    expect(player.duration).toBe(0);
+    expectUnready(player, onReady);
   });
 
   it("accepts the replacement document handshake before its load event", () => {
     const { player, iframe, onReady } = mountPlayer();
     vi.advanceTimersByTime(8000);
-    const failedDocument = iframe.contentDocument;
-    Object.defineProperty(iframe, "contentDocument", {
-      configurable: true,
-      get: () => failedDocument,
-    });
+    keepDocument(iframe, iframe.contentDocument);
     player.setAttribute("src", "next.html");
     const replacement = document.implementation.createHTMLDocument("Replacement");
-    Object.defineProperty(iframe, "contentDocument", {
-      configurable: true,
-      get: () => replacement,
-    });
+    keepDocument(iframe, replacement);
     sendTimeline(iframe);
-    expect(onReady).toHaveBeenCalledOnce();
-    expect(player.ready).toBe(true);
-    expect(player.duration).toBe(9);
+    expectTimelineReady(player, onReady);
   });
 
   it("keeps an opaque document failure latched until its next load event", () => {
     const { player, iframe, onError, onReady } = mountPlayer();
-    Object.defineProperty(iframe, "contentDocument", { configurable: true, get: () => null });
+    keepDocument(iframe, null);
     vi.advanceTimersByTime(8000);
     expect(onError).toHaveBeenCalledOnce();
     player.setAttribute("src", "https://example.org/next.html");
@@ -92,9 +91,7 @@ describe("terminal probe readiness", () => {
     expect(player.ready).toBe(false);
     iframe.dispatchEvent(new Event("load"));
     sendTimeline(iframe);
-    expect(onReady).toHaveBeenCalledOnce();
-    expect(player.ready).toBe(true);
-    expect(player.duration).toBe(9);
+    expectTimelineReady(player, onReady);
   });
 
   it("does not accept a runtime handshake after reporting an author error", () => {
@@ -103,8 +100,6 @@ describe("terminal probe readiness", () => {
     vi.advanceTimersByTime(200);
     expect(onError.mock.calls[0][0].detail.message).toBe("Uncaught Error: author failed");
     sendTimeline(iframe);
-    expect(onReady).not.toHaveBeenCalled();
-    expect(player.ready).toBe(false);
-    expect(player.duration).toBe(0);
+    expectUnready(player, onReady);
   });
 });
