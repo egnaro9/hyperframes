@@ -15,9 +15,11 @@ import { findWavChunk, writeWavWindow } from "./wav.js";
 import type { Word } from "./normalize.js";
 import { emitWords } from "./progress.js";
 import {
+  confidentLanguage,
   detectionWindows,
   parseDetection,
   pickLanguage,
+  requestedLanguage,
   WINDOW_SECONDS,
   type LanguageVote,
 } from "./language.js";
@@ -480,8 +482,8 @@ export async function transcribe(
   // 3. Prepare audio
   const wavPath = prepareWav(inputPath, options?.onProgress);
 
-  // `--language auto` asks for detection too; Desktop always sends it.
-  const requested = options?.language === "auto" ? undefined : options?.language;
+  // Desktop always sends `--language auto`.
+  const requested = requestedLanguage(options?.language);
   const automaticLanguage = requested === undefined && !model.endsWith(".en");
   const wavSeconds = getPreparedWavDurationSeconds(wavPath);
   const speechOnsetSeconds = detectSpeechOnset(wavPath);
@@ -526,6 +528,7 @@ export async function transcribe(
     overrideMs: options?.timeoutMs,
   });
   let through = 0;
+  let ownPick: LanguageVote | null = null;
   const heard = (words: Word[], at: number) => {
     if (!onEvent || (words.length === 0 && at <= through)) return;
     through = Math.max(through, at);
@@ -541,13 +544,11 @@ export async function transcribe(
           const segment = segmentWords(line);
           if (segment) heard(segment.words, segment.end);
         }),
-      onStderr:
-        onEvent && wavSeconds
-          ? (line) => {
-              const percent = /progress =\s*(\d+)%/.exec(line)?.[1];
-              if (percent) heard([], (Number(percent) / 100) * wavSeconds);
-            }
-          : undefined,
+      onStderr: (line) => {
+        ownPick ??= parseDetection(line);
+        const percent = /progress =\s*(\d+)%/.exec(line)?.[1];
+        if (percent && wavSeconds) heard([], (Number(percent) / 100) * wavSeconds);
+      },
     });
   } catch (err) {
     // Surface the timeout knob when the child was killed by our own timeout —
@@ -568,12 +569,8 @@ export async function transcribe(
   }
 
   const transcript = JSON.parse(readFileSync(transcriptPath, "utf-8"));
-  const reportedLanguage: unknown = transcript.result?.language;
-  const detectedLanguage =
-    picked ??
-    (automaticLanguage && typeof reportedLanguage === "string" && reportedLanguage.length > 0
-      ? reportedLanguage
-      : null);
+  // whisper's own pick (its first 30 s) labels the transcript only when it was sure.
+  const detectedLanguage = automaticLanguage ? (picked ?? confidentLanguage(ownPick)) : null;
   const segments = transcript.transcription ?? [];
 
   let wordCount = 0;
@@ -669,6 +666,8 @@ async function languageFromWindows(
         clip.onProgress?.(
           `Language detection failed for one window (${normalizeErrorMessage(err)}).`,
         );
+        // A hung whisper-cli would hang on every window.
+        if (isWhisperTimeoutError(err)) break;
       }
     }
   } finally {

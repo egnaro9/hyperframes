@@ -293,6 +293,12 @@ echo '{"sentences":[{"tokens":[{"text":" hola","start":0,"end":1}]}]}' > "$2/$(b
       expect(transcribeMock).toHaveBeenCalledTimes(1);
     });
 
+    it("--language auto, in any case, is detection: auto may use Parakeet", async () => {
+      const both = { sherpa: true, mlx: true };
+      expect(await transcribeWith("auto", both, "auto")).toMatchObject({ engine: "parakeet" });
+      expect(await transcribeWith("auto", both, "AUTO")).toMatchObject({ engine: "parakeet" });
+    });
+
     it("--engine parakeet with a language it does not transcribe fails without falling back", async () => {
       Object.assign(runners, { sherpa: true, mlx: true });
       const { exitCode, out } = await transcribeFails("parakeet", { language: "ja" });

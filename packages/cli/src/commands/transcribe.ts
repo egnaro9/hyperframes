@@ -1,4 +1,5 @@
 import { createProgressWriter } from "../whisper/progress.js";
+import { requestedLanguage } from "../whisper/language.js";
 import { failCommand, setCommandExitCode } from "../utils/commandResult.js";
 import { normalizeErrorMessage } from "../utils/errorMessage.js";
 // fallow-ignore-file code-duplication
@@ -322,6 +323,7 @@ async function transcribeAudio(
   const { createRenderCancellationScope, stoppedByCancelSignal } =
     await import("../utils/renderCancellation.js");
 
+  opts = { ...opts, language: requestedLanguage(opts.language) };
   const engine = (opts.engine ?? "auto").toLowerCase();
   if (engine !== "auto" && engine !== "parakeet" && engine !== "whisper") {
     failWith(`Unknown --engine: ${opts.engine}. Use auto, parakeet, or whisper.`, !!opts.json);

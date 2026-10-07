@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { detectionWindows, parseDetection, pickLanguage } from "./language.js";
+import { detectionWindows, parseDetection, pickLanguage, requestedLanguage } from "./language.js";
 
 describe("detectionWindows", () => {
   it("leaves a clip under a minute with no intro, or under 30 s of speech, to whisper's own pick", () => {
@@ -40,4 +40,10 @@ describe("parseDetection", () => {
     expect(parseDetection(line)).toEqual({ language: "es", p: 0.989864 });
     expect(parseDetection("whisper_init_from_file: loading model")).toBeNull();
   });
+});
+
+it("reads --language auto, in any case, as no language", () => {
+  expect(["auto", " AUTO "].map(requestedLanguage)).toEqual([undefined, undefined]);
+  expect(requestedLanguage("es")).toBe("es");
+  expect(requestedLanguage(undefined)).toBeUndefined();
 });

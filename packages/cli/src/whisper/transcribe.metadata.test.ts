@@ -8,7 +8,6 @@ import { encodeWav } from "./wav.test-helpers.js";
 
 const native = vi.hoisted(() => ({
   exec: vi.fn(),
-  missingLanguage: false,
   runtime: vi.fn(),
   printed: { stdout: "", stderr: "" },
 }));
@@ -62,7 +61,6 @@ let dir: string;
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "hf-language-"));
   writeFileSync(join(dir, "audio.wav"), Buffer.alloc(44));
-  native.missingLanguage = false;
   native.printed = { stdout: "", stderr: "" };
   native.runtime.mockReset().mockResolvedValue({ executablePath: "whisper-cli", source: "env" });
   native.exec.mockReset().mockImplementation((command: string, args: string[]) => {
@@ -81,7 +79,7 @@ beforeEach(() => {
     writeFileSync(
       `${output}.json`,
       JSON.stringify({
-        result: native.missingLanguage ? {} : { language },
+        result: { language },
         transcription: [
           {
             tokens: [
@@ -97,6 +95,7 @@ beforeEach(() => {
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 it("decodes multilingual audio automatically and returns the native detection", async () => {
+  native.printed.stderr = "whisper_full_with_state: auto-detected language: es (p = 0.983324)\n";
   const result = await transcribe(join(dir, "audio.wav"), dir, { model: "small" });
   expect(result).toMatchObject({ detectedLanguage: "es", model: "small", wordCount: 1 });
   expect(native.exec.mock.calls.filter(([command]) => command === "whisper-cli")).toHaveLength(1);
@@ -109,8 +108,8 @@ it.each([
   const result = await transcribe(join(dir, "audio.wav"), dir, { model, language });
   expect(result).toMatchObject({ detectedLanguage: null, model: resolved });
 });
-it("keeps an absent native language unknown", async () => {
-  native.missingLanguage = true;
+it("keeps an unsure native guess unknown: a wrong label is worse than none", async () => {
+  native.printed.stderr = "whisper_full_with_state: auto-detected language: en (p = 0.367277)\n";
   expect(await transcribe(join(dir, "audio.wav"), dir, { model: "small" })).toMatchObject({
     detectedLanguage: null,
   });
@@ -346,4 +345,14 @@ it("a detection that fails leaves the language to whisper's own pick", async () 
   expect(said).toContain(
     "Language detection failed for one window (unknown argument: --detect-language).",
   );
+});
+
+it("a detection that times out stops the rest, so a hung whisper-cli costs one timeout", async () => {
+  musicThenSpanish();
+  detectsByWindow(() => {
+    throw Object.assign(new Error("spawnSync whisper-cli ETIMEDOUT"), { code: "ETIMEDOUT" });
+  });
+  await transcribe(join(dir, "audio.wav"), dir, { model: "small" });
+  expect(detections()).toBe(1);
+  expect(languagePassed()).toEqual(["auto"]);
 });

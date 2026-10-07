@@ -19,7 +19,7 @@ npx hyperframes transcribe openai-response.json
 2. **Known non-English** → `--model small --language <iso-code>` (no `.en` suffix)
 3. **Unknown language** → `--model small` (whisper auto-detects)
 
-**CLI default is `small.en`** — do not rely on it; always pass `--model` to make the choice explicit. `--language` also filters out non-target-language segments from mixed-language audio.
+**CLI default is the multilingual `small`**; still pass `--model` to make the choice explicit. `--language` also filters out non-target-language segments from mixed-language audio.
 
 ## Model Sizes
 
