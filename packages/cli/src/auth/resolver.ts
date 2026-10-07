@@ -50,27 +50,18 @@ export interface ResolveOptions {
 export async function resolveCredential(opts: ResolveOptions = {}): Promise<ResolvedCredential> {
   const now = (opts.now ?? (() => new Date()))();
 
-  const heygenEnv = process.env["HEYGEN_API_KEY"];
-  if (heygenEnv && heygenEnv.length > 0) {
-    if (!isHeaderSafe(heygenEnv)) {
-      throw ErrInvalidStore("HEYGEN_API_KEY contains control characters");
-    }
+  const heygenEnv = headerSafeEnv("HEYGEN_API_KEY");
+  if (heygenEnv) {
     return { type: "api_key", key: heygenEnv, source: "env" };
   }
 
-  const hfEnv = process.env["HYPERFRAMES_API_KEY"];
-  if (hfEnv && hfEnv.length > 0) {
-    if (!isHeaderSafe(hfEnv)) {
-      throw ErrInvalidStore("HYPERFRAMES_API_KEY contains control characters");
-    }
+  const hfEnv = headerSafeEnv("HYPERFRAMES_API_KEY");
+  if (hfEnv) {
     return { type: "api_key", key: hfEnv, source: "env_alias" };
   }
 
-  const accessToken = process.env["HEYGEN_ACCESS_TOKEN"];
+  const accessToken = headerSafeEnv("HEYGEN_ACCESS_TOKEN");
   if (accessToken) {
-    if (!isHeaderSafe(accessToken)) {
-      throw ErrInvalidStore("HEYGEN_ACCESS_TOKEN contains control characters");
-    }
     return { type: "oauth", access_token: accessToken, source: "env_oauth", refreshable: false };
   }
 
@@ -85,6 +76,14 @@ export async function resolveCredential(opts: ResolveOptions = {}): Promise<Reso
     return { type: "api_key", key: credentials.api_key, source: fileSource };
   }
   throw credentials.oauth ? ErrLoginExpired() : ErrNotConfigured();
+}
+
+function headerSafeEnv(name: string): string | undefined {
+  const value = process.env[name];
+  if (value && !isHeaderSafe(value)) {
+    throw ErrInvalidStore(`${name} contains control characters`);
+  }
+  return value;
 }
 
 /** Like `resolveCredential` but returns `null` instead of throwing `NOT_CONFIGURED`. */
