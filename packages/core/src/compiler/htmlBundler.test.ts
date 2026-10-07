@@ -1852,14 +1852,20 @@ describe("bundleToSingleHtml", () => {
       "index.html": `<link rel="stylesheet" href="css/theme.css"><div data-composition-id="root" data-width="320" data-height="180"></div>`,
       "css/theme.css": String.raw`.raw { background: url("assets\\logo.png"); } .encoded { background: url("assets%5Clogo.png"); }`,
       "css/assets/logo.png": "separator-image",
-      "css/assets\\logo.png": "literal-backslash-image",
+      ...(process.platform === "win32"
+        ? {}
+        : { "css/assets\\logo.png": "literal-backslash-image" }),
     });
     const linked = await bundleToSingleHtml(dir, { inlineAssets: false });
     expect(styleText(linked)).toContain('url("css/assets/logo.png")');
-    expect(styleText(linked)).toContain('url("css/assets%5Clogo.png")');
+    const encodedUrl =
+      process.platform === "win32" ? 'url("css/assets/logo.png")' : 'url("css/assets%5Clogo.png")';
+    expect(styleText(linked)).toContain(encodedUrl);
     const inlined = await bundleToSingleHtml(dir);
     expect(styleText(inlined)).toContain(inlinedAs("image/png", "separator-image"));
-    expect(styleText(inlined)).toContain(inlinedAs("image/png", "literal-backslash-image"));
+    const encodedFileContents =
+      process.platform === "win32" ? "separator-image" : "literal-backslash-image";
+    expect(styleText(inlined)).toContain(inlinedAs("image/png", encodedFileContents));
   });
 
   it("removes CSS line continuations before rebasing linked stylesheet URLs", async () => {
