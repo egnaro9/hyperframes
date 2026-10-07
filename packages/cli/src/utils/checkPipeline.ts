@@ -10,6 +10,7 @@ import {
   buildLayoutSampleTimes,
   buildTransitionSampleTimes,
   collapseStaticLayoutIssues,
+  longestContiguousRunMs,
   dedupeLayoutIssues,
   limitLayoutIssues,
   mergeSampleTimes,
@@ -1516,7 +1517,16 @@ function shapeLayoutFindings(
     ? collapseStaticLayoutIssues(deduped, totalSampleCount)
     : deduped;
   const anchored = all.map(ensureAnchoredLayoutIssue);
-  const grouped = options.collapseStatic ? groupSampledFindings(anchored) : anchored;
+  let grouped = anchored;
+  if (options.collapseStatic) {
+    grouped = groupSampledFindings(anchored).map((finding) => ({
+      ...finding,
+      firstSeen: finding.times[0] ?? finding.time,
+      lastSeen: finding.times.at(-1) ?? finding.time,
+      occurrences: finding.times.length,
+      heldMs: longestContiguousRunMs(finding.times),
+    }));
+  }
   const limited = limitLayoutIssues(grouped, options.maxIssues);
   return {
     findings: limited.issues.map(ensureAnchoredLayoutIssue),

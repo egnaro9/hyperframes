@@ -1,3 +1,4 @@
+import { formatFindingTimes } from "./checkFindings.js";
 export interface LayoutRect {
   left: number;
   top: number;
@@ -144,7 +145,7 @@ export function summarizeLayoutIssues(issues: LayoutIssue[]): LayoutSummary {
 export function formatLayoutIssue(issue: LayoutIssue): string {
   let timeLabel = `t=${formatNumber(issue.time)}s`;
   if (issue.times) {
-    timeLabel = `t=${issue.times.map(formatNumber).join(", ")}s`;
+    timeLabel = formatFindingTimes(issue);
   } else if (issue.occurrences && issue.occurrences > 1) {
     timeLabel = `t=${formatNumber(issue.firstSeen ?? issue.time)}-${formatNumber(issue.lastSeen ?? issue.time)}s (${issue.occurrences} samples)`;
   }
@@ -274,7 +275,7 @@ export function collapseStaticLayoutIssues(
   );
 }
 
-function longestContiguousRunMs(times: number[]): number {
+export function longestContiguousRunMs(times: number[]): number {
   const sorted = [...new Set(times)].sort((a, b) => a - b);
   const first = sorted[0];
   const last = sorted.at(-1);

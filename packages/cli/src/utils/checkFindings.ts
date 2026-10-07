@@ -14,7 +14,7 @@ export function findingElementKey(finding: Pick<CheckFinding, "sourceFile" | "se
 export function groupSampledFindings<T extends CheckFinding>(
   findings: T[],
   compareEvidence: (next: T, current: T) => number = () => 0,
-): T[] {
+): (T & { times: number[] })[] {
   const groups = new Map<string, { finding: T; times: Set<number> }>();
   for (const finding of findings) {
     const key = JSON.stringify([findingElementKey(finding), finding.code]);

@@ -890,6 +890,10 @@ it("reports one moving element rule with both requested seek times", async () =>
       code: "frame_out_of_frame",
       time: 2,
       times: [2, 6],
+      firstSeen: 2,
+      lastSeen: 6,
+      occurrences: 2,
+      heldMs: 0,
       bbox: { x: 1920, y: 100, width: 130, height: 100 },
     }),
   ]);
@@ -1694,6 +1698,35 @@ describe("layout flag grammar", () => {
 });
 
 describe("sampled finding reporting", () => {
+  it("keeps different rules on one element as separate findings", async () => {
+    const { report } = await runScenario(
+      fakeDriver({
+        collectLayout: vi.fn(async (time: number) => [
+          layoutIssue("error", { time, code: "clipped_text" }),
+          layoutIssue("error", { time, code: "text_box_overflow" }),
+        ]),
+      }),
+      { contrast: false, samples: 2, at: [0.5, 1.5] },
+    );
+    expect(report.layout.findings.map(({ code, times }) => ({ code, times }))).toEqual([
+      { code: "clipped_text", times: [0.5, 1.5] },
+      { code: "text_box_overflow", times: [0.5, 1.5] },
+    ]);
+  });
+
+  it("retains per-sample layout observations when collapse is explicitly disabled", async () => {
+    const { report } = await runScenario(
+      fakeDriver({
+        collectLayout: vi.fn(async (time: number) => [layoutIssue("error", { time })]),
+      }),
+      { contrast: false, collapseStatic: false, samples: 2, at: [0.5, 1.5] },
+    );
+    expect(report.layout.findings.map(({ code, time }) => ({ code, time }))).toEqual([
+      { code: "clipped_text", time: 0.5 },
+      { code: "clipped_text", time: 1.5 },
+    ]);
+  });
+
   it("reports held low contrast once with every occurrence time in JSON and terminal output", async () => {
     const times = [0.111, 0.556, 1, 1.444, 1.889];
     const { report } = await runScenario(
