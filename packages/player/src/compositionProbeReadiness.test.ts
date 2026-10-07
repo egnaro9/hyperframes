@@ -48,12 +48,30 @@ describe("composition probe readiness", () => {
     expect(onReady.mock.calls[0][0].duration).toBe(6);
     expect(onError).not.toHaveBeenCalled();
   });
-  it("uses document duration when a direct timeline has zero length", () => {
-    const { onReady } = mount(root, { __timelines: { main: timeline(0) } });
-    vi.advanceTimersByTime(8000);
+  it("waits for a registered timeline to grow inside its initialization grace", () => {
+    let duration = 0;
+    const registered = { ...timeline(0), duration: () => duration };
+    const { onReady, onError } = mount(root, { __timelines: { main: registered } });
+    vi.advanceTimersByTime(600);
+    expect(onReady).not.toHaveBeenCalled();
+    duration = 9;
+    vi.advanceTimersByTime(200);
+    expect(onReady).toHaveBeenCalledOnce();
+    expect(onReady.mock.calls[0][0].duration).toBe(9);
+    expect(onReady.mock.calls[0][0].adapter.timeline).toBe(registered);
+    expect(onError).not.toHaveBeenCalled();
+  });
+  it("uses document duration through the runtime fallback when a timeline stays zero", () => {
+    const { iframe, onReady } = mount(root, { __timelines: { main: timeline(0) } });
+    vi.advanceTimersByTime(999);
+    expect(onReady).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(iframe.contentDocument!.querySelector("script")).not.toBeNull();
+    Object.assign(iframe.contentWindow!, { __player: { getDuration: () => 0 } });
+    vi.advanceTimersByTime(200);
     expect(onReady).toHaveBeenCalledOnce();
     expect(onReady.mock.calls[0][0].duration).toBe(6);
-    expect(onReady.mock.calls[0][0].adapter.kind).toBe("direct-timeline");
+    expect(onReady.mock.calls[0][0].adapter.kind).toBe("runtime");
     expect(onReady.mock.calls[0][0].adapter.getDuration()).toBe(6);
   });
   it("uses document clip ends when the runtime reports zero length", () => {

@@ -1,0 +1,69 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { HyperframesPlayer } from "./hyperframes-player.js";
+
+function mountPlayer() {
+  const player = document.createElement("hyperframes-player") as HyperframesPlayer;
+  document.body.appendChild(player);
+  const iframe = player.shadowRoot!.querySelector("iframe")!;
+  iframe.contentDocument!.body.innerHTML =
+    '<div data-composition-id="main"><div data-composition-src="child.html"></div></div>';
+  const onError = vi.fn();
+  const onReady = vi.fn();
+  player.addEventListener("error", onError);
+  player.addEventListener("ready", onReady);
+  iframe.dispatchEvent(new Event("load"));
+  return { player, iframe, onError, onReady };
+}
+
+function sendTimeline(iframe: HTMLIFrameElement) {
+  window.dispatchEvent(
+    new MessageEvent("message", {
+      source: iframe.contentWindow,
+      data: { source: "hf-preview", type: "timeline", durationInFrames: 270, scenes: [] },
+    }),
+  );
+}
+
+describe("terminal probe readiness", () => {
+  beforeEach(async () => {
+    await import("./hyperframes-player.js");
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    document.body.innerHTML = "";
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  });
+
+  it("does not accept a runtime timeline message after the probe timed out", () => {
+    const { player, iframe, onError, onReady } = mountPlayer();
+    vi.advanceTimersByTime(8000);
+    expect(onError).toHaveBeenCalledOnce();
+    vi.advanceTimersByTime(1000);
+    sendTimeline(iframe);
+    expect(onReady).not.toHaveBeenCalled();
+    expect(player.ready).toBe(false);
+    expect(player.duration).toBe(0);
+  });
+
+  it("accepts a new source handshake after the old source timed out", () => {
+    const { player, iframe, onReady } = mountPlayer();
+    vi.advanceTimersByTime(8000);
+    player.setAttribute("src", "next.html");
+    sendTimeline(iframe);
+    expect(onReady).toHaveBeenCalledOnce();
+    expect(player.ready).toBe(true);
+    expect(player.duration).toBe(9);
+  });
+
+  it("does not accept a runtime handshake after reporting an author error", () => {
+    const { player, iframe, onError, onReady } = mountPlayer();
+    Object.assign(iframe.contentWindow!, { __hfPreviewErrors: ["Uncaught Error: author failed"] });
+    vi.advanceTimersByTime(200);
+    expect(onError.mock.calls[0][0].detail.message).toBe("Uncaught Error: author failed");
+    sendTimeline(iframe);
+    expect(onReady).not.toHaveBeenCalled();
+    expect(player.ready).toBe(false);
+    expect(player.duration).toBe(0);
+  });
+});

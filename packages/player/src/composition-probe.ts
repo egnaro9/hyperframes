@@ -83,6 +83,11 @@ function firstAuthorError(errors: unknown): string | null {
 export class CompositionProbe {
   private _interval: ReturnType<typeof setInterval> | null = null;
   private _runtimeInjected = false;
+  private _failed = false;
+
+  get failed(): boolean {
+    return this._failed;
+  }
 
   constructor(
     private readonly _iframe: HTMLIFrameElement,
@@ -94,7 +99,7 @@ export class CompositionProbe {
     return this._runtimeInjected;
   }
 
-  /** Start (or restart) the probe. Stops any previously running probe first. */
+  /** Start or restart the probe, stopping the active interval first. */
   start(): void {
     this.stop();
     this._runtimeInjected = false;
@@ -115,12 +120,15 @@ export class CompositionProbe {
       }
       if (outcome) {
         this.stop();
-        if (outcome.kind === "error") this._callbacks.onError(outcome.message);
-        else this._callbacks.onReady(outcome.result);
+        if (outcome.kind === "error") {
+          this._failed = true;
+          this._callbacks.onError(outcome.message);
+        } else this._callbacks.onReady(outcome.result);
         return;
       }
       if (attempts >= 40) {
         this.stop();
+        this._failed = true;
         this._callbacks.onError("Composition timeline not found after 8s");
       }
     }, 200);
@@ -156,22 +164,21 @@ export class CompositionProbe {
       kind: "document",
       getDuration: () => 0,
     };
-    const adapterDuration = adapter.getDuration();
-    let duration = adapterDuration;
+    let duration = adapter.getDuration();
     if (!Number.isFinite(duration) || duration <= 0) {
+      if (adapter.kind === "direct-timeline") return null;
       duration = doc ? (readStaticCompositionMeta(doc)?.durationSeconds ?? 0) : 0;
     }
     if (duration <= 0) return null;
-    const resolvedAdapter: PlaybackDurationAdapter =
-      adapterDuration === duration ? adapter : { ...adapter, getDuration: () => duration };
     return {
       duration,
-      adapter: resolvedAdapter,
+      adapter: { ...adapter, getDuration: () => duration },
       compositionSize: readCompositionSizeFromDocument(doc),
     };
   }
 
   stop(): void {
+    this._failed = false;
     if (this._interval !== null) {
       clearInterval(this._interval);
       this._interval = null;
