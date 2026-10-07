@@ -81,6 +81,46 @@ function makeSymlinkProject(
 }
 
 describe("bundleToSingleHtml", () => {
+  it("resolves encoded URL filenames once across asset, stylesheet and script consumers", async () => {
+    const dir = makeTempProject({
+      "index.html":
+        '<html><head><link rel="stylesheet" href="style%3F%2520%23.css?cache=1"></head><body><main data-composition-id="root" data-width="320" data-height="180"><img src="image%3F%2520%23.png#view"><div data-composition-id="scene" data-composition-src="scene%20.html" data-start="0" data-duration="1"></div></main><script src="app%3F%2520%23.js?cache=1"></script></body></html>',
+      "style?%20#.css":
+        '@import "base%3F%2520%23.css"; .image {background:url(image%3F%2520%23.png)}',
+      "base?%20#.css": ".decoded-import { color: blue; }",
+      "image?%20#.png": "encoded image witness",
+      "app?%20#.js": "window.encodedScriptWitness = true;",
+      "scene%20.html":
+        '<template><div data-composition-id="scene" data-width="320" data-height="180"><p>raw composition witness</p></div></template>',
+    });
+    try {
+      const bundled = await bundleToSingleHtml(dir);
+      expect(bundled).toContain(inlinedAs("image/png", "encoded image witness"));
+      expect(bundled).toContain(".decoded-import");
+      expect(bundled).toContain("window.encodedScriptWitness = true;");
+      expect(bundled).toContain("raw composition witness");
+      expect(bundled).not.toContain('src="app%3F%2520%23.js');
+      expect(styleText(bundled)).not.toContain("url(image%3F%2520%23.png)");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("checks project containment after decoding an asset URL", async () => {
+    const dir = makeTempProject({
+      "index.html":
+        '<html><body><main data-composition-id="root" data-width="320" data-height="180"><img src="%2e%2e/outside.png"></main></body></html>',
+    });
+    const reads = new Set<string>();
+    try {
+      const bundled = await bundleToSingleHtml(dir, { onRead: (path) => reads.add(path) });
+      expect(bundled).toContain("%2e%2e/outside.png");
+      expect(reads).not.toContain(join(dir, "..", "outside.png"));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("reports every project file it reads or looks for through onRead", async () => {
     const dir = makeTempProject({
       "index.html": `<!doctype html><html><head>

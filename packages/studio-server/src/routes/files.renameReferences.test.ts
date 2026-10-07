@@ -19,6 +19,28 @@ function fileRoutesFor(project: string): Hono {
 }
 
 describe("rename references", () => {
+  it("keeps the whole unquoted reference valid when renaming a folder with spaces", () => {
+    expect(rewrite("<img src=assets/a.png>", "assets", "my assets", true)).toBe(
+      "<img src=my&#32;assets/a.png>",
+    );
+    expect(referenceRewriter("assets", "my assets", true)("url(assets/a.png)", "css")).toBe(
+      "url(my%20assets/a.png)",
+    );
+  });
+
+  it("can rename a template-literal filename again after escaping interpolation", () => {
+    const original = "`assets/a.png`";
+    const first = referenceRewriter(
+      "assets/a.png",
+      "assets/${name}.png",
+      false,
+    )(original, "script");
+    expect(first).toBe("`assets/\\${name}.png`");
+    expect(
+      referenceRewriter("assets/${name}.png", "assets/final.png", false)(first, "script"),
+    ).toBe("`assets/final.png`");
+  });
+
   it("keeps URL delimiters and literal percent signs escaped in an entity-spelled reference", () => {
     expect(
       rewrite('<img src="assets/a&amp;b.png">', "assets/a&b.png", "assets/c?%20#.png", false),
@@ -41,7 +63,7 @@ describe("rename references", () => {
 
   it("escapes a newly introduced quote even when the old reference used no escapes", () => {
     expect(rewrite('<img src="assets/a.png">', "assets/a.png", 'assets/say "hi".png', false)).toBe(
-      '<img src="assets/say%20%22hi%22.png">',
+      '<img src="assets/say &quot;hi&quot;.png">',
     );
   });
 
@@ -237,6 +259,99 @@ describe("renaming a folder over the route", () => {
       '<img src="brand/a.png"><img src="assets-backup/a.png"><img src="other assets/a.png"><a href="empty assets/">x</a><p>The assets folder</p>',
     );
   });
+
+  it("keeps raw quoted file paths usable in JSON and script strings", async () => {
+    const project = mkdtempSync(join(tmpdir(), "hf-rename-quote-"));
+    dirs.push(project);
+    mkdirSync(join(project, "assets"));
+    writeFileSync(join(project, "assets", "a.png"), "original asset");
+    writeFileSync(join(project, "config.json"), '{"path":"assets/a.png"}');
+    writeFileSync(join(project, "script.js"), '"assets/a.png"');
+    writeFileSync(join(project, "index.html"), '<script>"assets/a.png"</script>');
+    const app = fileRoutesFor(project);
+    const response = await app.request("/projects/p/files/assets/a.png", {
+      method: "PATCH",
+      body: JSON.stringify({ newPath: 'assets/say "hi".png' }),
+    });
+    expect(response.status).toBe(200);
+    const config = JSON.parse(readFileSync(join(project, "config.json"), "utf8")) as {
+      path: string;
+    };
+    expect(readFileSync(join(project, config.path), "utf8")).toBe("original asset");
+    expect(JSON.parse(readFileSync(join(project, "script.js"), "utf8"))).toBe(
+      'assets/say "hi".png',
+    );
+    expect(readFileSync(join(project, "index.html"), "utf8")).toBe(
+      String.raw`<script>"assets/say \"hi\".png"</script>`,
+    );
+    const renamedAgain = await app.request(
+      `/projects/p/files/${encodeURIComponent('assets/say "hi".png')}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ newPath: "assets/final.png" }),
+      },
+    );
+    expect(renamedAgain.status).toBe(200);
+    const finalConfig = JSON.parse(readFileSync(join(project, "config.json"), "utf8")) as {
+      path: string;
+    };
+    expect(readFileSync(join(project, finalConfig.path), "utf8")).toBe("original asset");
+    expect(JSON.parse(readFileSync(join(project, "script.js"), "utf8"))).toBe("assets/final.png");
+  });
+
+  it("renames URL fields to literal URL punctuation without changing raw file values", async () => {
+    const project = mkdtempSync(join(tmpdir(), "hf-rename-url-fields-"));
+    dirs.push(project);
+    mkdirSync(join(project, "assets"));
+    writeFileSync(join(project, "assets", "a.png"), "image witness");
+    writeFileSync(join(project, "config.json"), '{"path":"assets/a.png"}');
+    writeFileSync(
+      join(project, "index.html"),
+      '<html><head><style>.image{background:url(assets/a.png)}</style></head><body><main data-composition-id="root" data-width="320" data-height="180"><img src="assets/a.png"><a href="assets/a.png">image</a></main></body></html>',
+    );
+    const response = await fileRoutesFor(project).request("/projects/p/files/assets/a.png", {
+      method: "PATCH",
+      body: JSON.stringify({ newPath: "assets/c?%20#.png" }),
+    });
+    expect(response.status).toBe(200);
+    expect(JSON.parse(readFileSync(join(project, "config.json"), "utf8")).path).toBe(
+      "assets/c?%20#.png",
+    );
+    const html = readFileSync(join(project, "index.html"), "utf8");
+    expect(html).toContain('src="assets/c%3F%2520%23.png"');
+    expect(html).toContain('href="assets/c%3F%2520%23.png"');
+    expect(html).toContain("url(assets/c%3F%2520%23.png)");
+    const { bundleToSingleHtml } = await import("@hyperframes/core/compiler");
+    const bundled = await bundleToSingleHtml(project);
+    expect(bundled).toContain("data:image/png;base64,aW1hZ2Ugd2l0bmVzcw==");
+    expect(bundled).not.toContain("url(assets/c%3F%2520%23.png)");
+  });
+
+  it.each(["my intro.html", 'my "intro".html', "my ?%20#intro.html"])(
+    "keeps a renamed sub-composition %s reachable by the bundler",
+    async (newName) => {
+      const project = mkdtempSync(join(tmpdir(), "hf-rename-composition-"));
+      dirs.push(project);
+      mkdirSync(join(project, "scenes"));
+      writeFileSync(
+        join(project, "index.html"),
+        '<!doctype html><html><body><main data-composition-id="root" data-width="320" data-height="180"><div data-composition-id="intro" data-composition-src="scenes/intro.html" data-start="0" data-duration="2"></div></main></body></html>',
+      );
+      writeFileSync(
+        join(project, "scenes", "intro.html"),
+        '<template><div data-composition-id="intro" data-width="320" data-height="180"><p>Renamed scene still present</p></div></template>',
+      );
+      const app = fileRoutesFor(project);
+      const response = await app.request("/projects/p/files/scenes/intro.html", {
+        method: "PATCH",
+        body: JSON.stringify({ newPath: `scenes/${newName}` }),
+      });
+      expect(response.status).toBe(200);
+      const { bundleToSingleHtml } = await import("@hyperframes/core/compiler");
+      const bundled = await bundleToSingleHtml(project);
+      expect(bundled).toContain("Renamed scene still present");
+    },
+  );
 
   it.each([
     ["my clip.mp4", "next clip.mp4", "my%20clip.mp4", "next%20clip.mp4"],

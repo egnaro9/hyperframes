@@ -39,7 +39,6 @@ import {
 } from "../helpers/safePath.js";
 import { backupPathForResponse, snapshotBeforeWrite } from "../helpers/backupJournal.js";
 import { projectDirMissing } from "../helpers/projectDirMissing.js";
-import { decodeWellFormedEscapes } from "../helpers/requestSubPath.js";
 import {
   createWriteToken,
   fileContentVersion,
@@ -108,7 +107,7 @@ import {
   insertCompositionIntoSource,
 } from "../helpers/compositionInsertion.js";
 import { resolveGsapWriter } from "./gsapMutationCapabilities.js";
-import { requestSubPath } from "../helpers/requestSubPath.js";
+import { decodeWellFormedEscapes, requestSubPath } from "../helpers/requestSubPath.js";
 import {
   hasCompositionOutsideTemplates,
   insertBeforeCloseTag,
@@ -724,16 +723,89 @@ function referenceSpellings(char: string): string {
   if (encoded !== char)
     spellings.push(encoded.replace(/[A-F]/g, (hex) => `[${hex}${hex.toLowerCase()}]`));
   if (ENTITY_SPELLINGS[char]) spellings.push(...ENTITY_SPELLINGS[char]);
+  const scriptSpelling = JSON.stringify(char).slice(1, -1);
+  if (scriptSpelling !== char) spellings.push(escapeRegExp(scriptSpelling));
+  if (["'", "`", "$", " ", "(", ")"].includes(char)) spellings.push(escapeRegExp(`\\${char}`));
+  if (/[\t\n\f\r =<>`]/.test(char)) spellings.push(`&#${char.codePointAt(0)!};`);
+  if (char.charCodeAt(0) < 0x20 || char.charCodeAt(0) === 0x7f) {
+    spellings.push(escapeRegExp(`\\${char.charCodeAt(0).toString(16)} `));
+  }
   return spellings.length === 1 ? spellings[0]! : `(?:${spellings.join("|")})`;
 }
 
-function spellLike(reference: string, path: string): string {
-  if (!ENTITY_REFERENCE_PATTERN.test(reference) || /%[0-9A-Fa-f]{2}/.test(reference)) {
-    return encodeFileReference(path);
+type ReferenceSyntax = "html" | "script" | "css" | "plain";
+
+function escapeHtmlReference(path: string): string {
+  return path.replace(/[&"']/g, (char) => ENTITY_SPELLINGS[char]![0]!);
+}
+
+function escapeQuotedReference(path: string, quote: string): string {
+  const escaped = JSON.stringify(path).slice(1, -1);
+  return quote === '"'
+    ? escaped
+    : escaped.replace(new RegExp(escapeRegExp(quote), "g"), `\\${quote}`);
+}
+
+function spellLike(
+  reference: string,
+  path: string,
+  oldPath: string,
+  syntax: ReferenceSyntax,
+  quote: string,
+  url: boolean,
+): string {
+  if (reference !== oldPath && /%[0-9A-Fa-f]{2}/.test(reference)) return encodeFileReference(path);
+  if (reference !== oldPath && ENTITY_REFERENCE_PATTERN.test(reference)) {
+    return escapeHtmlReference(url ? path.replace(/[?%#]/g, encodeFileReference) : path);
   }
-  return path
-    .replace(/[?%#]/g, encodeFileReference)
-    .replace(/[&"']/g, (char) => ENTITY_SPELLINGS[char]![0]!);
+  switch (syntax) {
+    case "html": {
+      const escaped = escapeHtmlReference(url ? path.replace(/[?%#]/g, encodeFileReference) : path);
+      return ["'", '"'].includes(quote)
+        ? escaped
+        : escaped.replace(/[\t\n\f\r =<>`]/g, (char) => `&#${char.codePointAt(0)!};`);
+    }
+    case "script": {
+      if (!["'", '"', "`"].includes(quote)) return path;
+      const escaped = escapeQuotedReference(path, quote);
+      return quote === "`" ? escaped.replace(/\$\{/g, "\\${") : escaped;
+    }
+    case "css":
+      return url ? encodeFileReference(path) : path;
+    case "plain":
+      return path;
+  }
+}
+
+function referenceSyntax(file: string): ReferenceSyntax {
+  if (/\.html$/i.test(file)) return "html";
+  if (/\.css$/i.test(file)) return "css";
+  if (/\.(?:[cm]?js|jsx|tsx?|json)$/i.test(file)) return "script";
+  return "plain";
+}
+
+function decodeQuotedReference(text: string, syntax: ReferenceSyntax): string {
+  if (syntax === "css") {
+    return text.replace(
+      /\\(?:([0-9a-f]{1,6})[ \t\r\n\f]?|([\s\S]))/gi,
+      (escaped, hex: string | undefined, char: string | undefined) => {
+        if (hex === undefined) return char!;
+        const code = Number.parseInt(hex, 16);
+        return code <= 0x10ffff ? String.fromCodePoint(code) : escaped;
+      },
+    );
+  }
+  if (syntax === "script") {
+    const controls: Record<string, string> = { b: "\b", f: "\f", n: "\n", r: "\r", t: "\t" };
+    return text.replace(
+      /\\(?:u([0-9a-fA-F]{4})|([bfnrt"'`$\\/]))/g,
+      (_escaped, hex: string | undefined, char: string | undefined) => {
+        if (hex !== undefined) return String.fromCharCode(Number.parseInt(hex, 16));
+        return controls[char!] ?? char!;
+      },
+    );
+  }
+  return text;
 }
 
 function referencePattern(oldPath: string, isDirectory: boolean): RegExp {
@@ -755,7 +827,7 @@ export function referenceRewriter(
   newPath: string,
   isDirectory: boolean,
   existing: readonly string[] = [],
-): (text: string) => string {
+): (text: string, syntax?: ReferenceSyntax) => string {
   const pattern = referencePattern(oldPath, isDirectory);
   const around = new Map<string, Map<number, Set<string>>>();
   const afterLengths = new Set<number>();
@@ -769,23 +841,72 @@ export function referenceRewriter(
         before,
       );
       afterLengths.add(after.length);
-      window = Math.max(window, path.length * 6);
+      window = Math.max(window, path.length * 9);
     }
   }
-  const normalized = (text: string) =>
+  const normalized = (text: string, syntax: ReferenceSyntax) =>
     decodeWellFormedEscapes(
-      text.replace(
-        new RegExp(ENTITY_REFERENCE_PATTERN.source, "g"),
-        (entity) => ENTITY_CHARACTERS.get(entity)!,
+      decodeQuotedReference(text, syntax).replace(
+        new RegExp(`${ENTITY_REFERENCE_PATTERN.source}|&#([0-9]{1,7});`, "g"),
+        (entity, code: string | undefined) => {
+          if (code === undefined) return ENTITY_CHARACTERS.get(entity)!;
+          const value = Number(code);
+          return value <= 0x10ffff ? String.fromCodePoint(value) : entity;
+        },
       ),
     ).replace(/\\{0,2}[\\/]/g, "/");
-  return (text) =>
-    text.replace(pattern, (...args) => {
+  return (text, syntax = "html") => {
+    const inlineRegions =
+      syntax === "html"
+        ? [...text.matchAll(/<(script|style)\b[^>]*>([\s\S]*?)<\/\1\s*>/gi)].map((match) => ({
+            start: match.index! + match[0].indexOf(">") + 1,
+            end: match.index! + match[0].lastIndexOf("<"),
+            syntax: match[1]!.toLowerCase() === "style" ? ("css" as const) : ("script" as const),
+          }))
+        : [];
+    const urlRegions = [
+      ...(syntax === "html"
+        ? [
+            ...text.matchAll(/[\t\n\f\r ](?:src|href|poster)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi),
+          ].map((match) => ({
+            start: match.index!,
+            end: match.index! + match[0].length,
+            syntax: "html" as const,
+          }))
+        : []),
+      ...(syntax === "html" || syntax === "css"
+        ? [
+            ...text.matchAll(
+              /\burl\(\s*(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|(?:\\.|[^)\\])*)\s*\)/gi,
+            ),
+          ].map((match) => ({
+            start: match.index!,
+            end: match.index! + match[0].length,
+            syntax: "css" as const,
+          }))
+        : []),
+      ...(syntax === "html" || syntax === "css"
+        ? [...text.matchAll(/@import\s+(?:"[^"]*"|'[^']*')/gi)].map((match) => ({
+            start: match.index!,
+            end: match.index! + match[0].length,
+            syntax: "css" as const,
+          }))
+        : []),
+    ].sort((a, b) => a.start - b.start);
+    let urlIndex = 0;
+    let regionIndex = 0;
+    return text.replace(pattern, (...args) => {
       const [match, offset] = [args[0] as string, args.at(-3) as number];
       const { lead } = args.at(-1) as { lead: string };
+      while (inlineRegions[regionIndex] && inlineRegions[regionIndex]!.end <= offset) regionIndex++;
+      const region = inlineRegions[regionIndex];
+      const matchSyntax = region && offset >= region.start ? region.syntax : syntax;
       const at = offset + lead.length;
-      const head = normalized(text.slice(Math.max(0, at - window), at));
-      const tail = normalized(text.slice(offset + match.length, offset + match.length + window));
+      const head = normalized(text.slice(Math.max(0, at - window), at), matchSyntax);
+      const tail = normalized(
+        text.slice(offset + match.length, offset + match.length + window),
+        matchSyntax,
+      );
       const inLonger = [...afterLengths].some((after) => {
         const befores = tail.length >= after && around.get(tail.slice(0, after));
         return (
@@ -795,8 +916,14 @@ export function referenceRewriter(
           )
         );
       });
-      return inLonger ? match : `${lead}${spellLike(match.slice(lead.length), newPath)}`;
+      if (inLonger) return match;
+      while (urlRegions[urlIndex] && urlRegions[urlIndex]!.end <= offset) urlIndex++;
+      const urlRegion = urlRegions[urlIndex];
+      const url = matchSyntax !== "script" && !!urlRegion && offset >= urlRegion.start;
+      const quote = text[offset - 1] ?? "";
+      return `${lead}${spellLike(match.slice(lead.length), newPath, oldPath, url ? urlRegion!.syntax : matchSyntax, quote, url)}`;
     });
+  };
 }
 
 function occurrences(text: string, part: string): number[] {
@@ -851,7 +978,7 @@ function updateReferences(
     const content = readableText(file);
     if (content === null) continue;
 
-    const updated = rewrite(content);
+    const updated = rewrite(content, referenceSyntax(file));
     if (updated !== content) {
       replaceFileAtomically(file, updated, statSync(file).mode);
       updatedCount++;

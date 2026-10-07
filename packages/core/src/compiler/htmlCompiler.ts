@@ -1,4 +1,5 @@
 import { resolve } from "path";
+import { decodedUrlPath } from "@hyperframes/parsers/asset-paths";
 import {
   compileTimingAttrs,
   injectDurations,
@@ -15,7 +16,9 @@ import {
 export type MediaDurationProber = (src: string) => Promise<number>;
 
 function resolveMediaSrc(src: string, projectDir: string): string {
-  return src.startsWith("http://") || src.startsWith("https://") ? src : resolve(projectDir, src);
+  return src.startsWith("http://") || src.startsWith("https://")
+    ? src
+    : resolve(projectDir, decodedUrlPath(src));
 }
 
 /**
