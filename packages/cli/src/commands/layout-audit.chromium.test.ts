@@ -92,6 +92,90 @@ describe.runIf(executablePath)("layout audit in Chromium", () => {
     expect(codes.includes("text_box_overflow")).toBe(error);
   });
   it.each([
+    {
+      name: "inherited Turkish uppercase",
+      parentLang: "tr",
+      ownLang: null,
+      transform: "uppercase",
+      text: "i",
+      gap: 75,
+      overlap: true,
+    },
+    {
+      name: "nearest regional Turkish uppercase",
+      parentLang: "en",
+      ownLang: "TR-tr",
+      transform: "uppercase",
+      text: "i",
+      gap: 75,
+      overlap: true,
+    },
+    {
+      name: "inherited Azerbaijani uppercase",
+      parentLang: "az",
+      ownLang: null,
+      transform: "uppercase",
+      text: "i",
+      gap: 75,
+      overlap: true,
+    },
+    {
+      name: "English override",
+      parentLang: "tr",
+      ownLang: "en",
+      transform: "uppercase",
+      text: "i",
+      gap: 75,
+      overlap: false,
+    },
+    {
+      name: "empty language override",
+      parentLang: "tr",
+      ownLang: "",
+      transform: "uppercase",
+      text: "i",
+      gap: 75,
+      overlap: false,
+    },
+    {
+      name: "invalid language override",
+      parentLang: "tr",
+      ownLang: "not_a_locale",
+      transform: "uppercase",
+      text: "i",
+      gap: 75,
+      overlap: false,
+    },
+    {
+      name: "Turkish lowercase dotless I",
+      parentLang: "tr",
+      ownLang: null,
+      transform: "lowercase",
+      text: "I",
+      gap: 60,
+      overlap: false,
+    },
+    {
+      name: "English lowercase dotted I",
+      parentLang: "en",
+      ownLang: null,
+      transform: "lowercase",
+      text: "I",
+      gap: 60,
+      overlap: true,
+    },
+  ])(
+    "uses painted casing for $name",
+    async ({ parentLang, ownLang, transform, text, gap, overlap }) => {
+      const language = ownLang === null ? "" : `lang="${ownLang}"`;
+      const html = `<div ${language}>${heading(100, text, `text-transform:${transform}`)}${heading(100 + gap, text, `text-transform:${transform}`)}</div>`;
+      const codes = await auditCodes(
+        `<div lang="${parentLang}" data-composition-id="main" data-width="1920" data-height="1080" style="position:relative;width:1920px;height:1080px">${html}</div>`,
+      );
+      expect(codes.includes("content_overlap")).toBe(overlap);
+    },
+  );
+  it.each([
     { name: "inline-block words wrapping at line-height .8", html: WORDS_08, overlap: false },
     {
       name: "the same words at line-height .4, where the glyphs collide",

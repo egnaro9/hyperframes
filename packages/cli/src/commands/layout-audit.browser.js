@@ -486,8 +486,11 @@
     if (!context) return null;
     context.font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
     let text = textContentFor(element, true);
-    if (style.textTransform === "uppercase") text = text.toUpperCase();
-    if (style.textTransform === "lowercase") text = text.toLowerCase();
+    const turkic = element.matches(":lang(tr), :lang(az)");
+    if (style.textTransform === "uppercase")
+      text = turkic ? text.toLocaleUpperCase("tr") : text.toUpperCase();
+    if (style.textTransform === "lowercase")
+      text = turkic ? text.toLocaleLowerCase("tr") : text.toLowerCase();
     if (style.textTransform === "capitalize") text = capitalizeWords(text);
     const metrics = context.measureText(text);
     return metrics.fontBoundingBoxAscent + metrics.fontBoundingBoxDescent > 0 ? metrics : null;
