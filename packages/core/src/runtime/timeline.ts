@@ -234,11 +234,6 @@ function buildTimelineClipLabel(node: Element, kind: RuntimeTimelineClip["kind"]
     null;
   if (explicit?.trim()) return explicit.trim();
 
-  if (kind === "video" || kind === "audio" || kind === "image") {
-    const assetName = filenameFromAssetUrl(resolveNodeAssetUrl(node));
-    if (assetName) return humanizeTimelineToken(assetName);
-  }
-
   const compositionId = authoredCompositionId(node);
   if (compositionId) return humanizeTimelineToken(compositionId);
 

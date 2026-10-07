@@ -641,7 +641,7 @@ describe("collectRuntimeTimelinePayload", () => {
   });
 
   it.each(["video", "audio", "img"])(
-    "updates a generated %s label after replacing its source",
+    "preserves an authored %s id after replacing its source",
     (tag) => {
       document.body.innerHTML = `<div data-composition-id="main" data-duration="10">
       <${tag} id="harbor" class="clip harbor" src="assets/harbor.mp4"
@@ -649,7 +649,7 @@ describe("collectRuntimeTimelinePayload", () => {
     </div>`;
       expect(collectRuntimeTimelinePayload(defaultParams).clips[0].label).toBe("Harbor");
       document.getElementById("harbor")!.setAttribute("src", "assets/library.mp4");
-      expect(collectRuntimeTimelinePayload(defaultParams).clips[0].label).toBe("Library");
+      expect(collectRuntimeTimelinePayload(defaultParams).clips[0].label).toBe("Harbor");
     },
   );
 
@@ -659,7 +659,7 @@ describe("collectRuntimeTimelinePayload", () => {
     ["Harbor%.mp4?v=1.2", "Harbor%"],
   ])("decodes the generated label from %s", (filename, label) => {
     document.body.innerHTML = `<div data-composition-id="main" data-duration="10">
-      <video id="old-name" src="assets/${filename}" data-start="0" data-duration="5"></video>
+      <video src="assets/${filename}" data-start="0" data-duration="5"></video>
     </div>`;
     expect(collectRuntimeTimelinePayload(defaultParams).clips[0].label).toBe(label);
   });
@@ -671,7 +671,7 @@ describe("collectRuntimeTimelinePayload", () => {
     try {
       expect(document.baseURI).toBe("about:blank");
       document.body.innerHTML = `<div data-composition-id="main" data-duration="10">
-        <video id="old-name" src="assets/Harbor%20Sunset.mp4?v=1.2"
+        <video src="assets/Harbor%20Sunset.mp4?v=1.2"
           data-start="0" data-duration="5"></video>
       </div>`;
       expect(collectRuntimeTimelinePayload(defaultParams).clips[0].label).toBe("Harbor Sunset");
