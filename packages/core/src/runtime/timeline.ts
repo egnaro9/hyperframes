@@ -190,7 +190,11 @@ function filenameFromAssetUrl(url: string | null): string | null {
     const parsed = new URL(url, document.baseURI);
     filename = parsed.pathname.split("/").filter(Boolean).at(-1);
   } catch {
-    filename = url.split(/[?#]/)[0].split(/[\\/]/).filter(Boolean).at(-1);
+    filename = url
+      .replace(/[?#].*$/, "")
+      .split(/[\\/]/)
+      .filter(Boolean)
+      .at(-1);
   }
   if (!filename) return null;
   try {
