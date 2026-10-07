@@ -10,7 +10,7 @@ import { randomUUID } from "node:crypto";
 import { findFFmpeg, findFFprobe, getFFmpegInstallHint } from "../browser/ffmpeg.js";
 import { stoppedByCancelSignal } from "../utils/renderCancellation.js";
 import { ensureWhisper, ensureModel, hasFFmpeg, DEFAULT_MODEL } from "./manager.js";
-import { findWavChunk } from "./wav.js";
+import { findWavChunk, leadingSilenceOffsetMs } from "./wav.js";
 import type { Word } from "./normalize.js";
 import { emitWords } from "./progress.js";
 
@@ -180,7 +180,7 @@ export function detectSpeechOnset(wavPath: string): number | null {
   const WINDOW_SAMPLES = SAMPLE_RATE * WINDOW_SECONDS;
   const SUSTAINED_WINDOWS = 3; // 1.5s above threshold to count as onset
   const SILENCE_THRESHOLD_RATIO = 0.6;
-  const MIN_INTRO_SECONDS = 3; // don't strip if onset is very early
+  const MIN_INTRO_SECONDS = 3;
 
   try {
     const buf = readFileSync(wavPath);
@@ -497,6 +497,8 @@ export async function transcribe(
     "--suppress-nst",
   ];
   whisperArgs.push("--language", language);
+  const offsetMs = leadingSilenceOffsetMs(readFileSync(wavPath));
+  if (offsetMs > 0) whisperArgs.push("--offset-t", String(offsetMs));
   const onEvent = options?.onEvent;
   if (onEvent) whisperArgs.push("--print-progress");
   whisperArgs.push(wavPath);

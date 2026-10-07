@@ -2,6 +2,8 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { loadTranscript } from "./normalize.js";
+import { encodeWav } from "./wav.test-helpers.js";
 import { transcribe, type TranscribeProgress } from "./transcribe.js";
 
 const native = vi.hoisted(() => ({
@@ -91,6 +93,60 @@ beforeEach(() => {
   });
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+it("skips a long true-silence lead and keeps native words on the original clock", async () => {
+  const samples = new Float32Array(41 * 16_000);
+  samples.fill(0.1, 40 * 16_000);
+  writeFileSync(join(dir, "audio.wav"), encodeWav(samples, 16_000));
+  const original = native.exec.getMockImplementation()!;
+  native.exec.mockImplementation((command: string, args: string[]) => {
+    const result = original(command, args);
+    if (command === "whisper-cli" && args.includes("--output-file")) {
+      const output = args[args.indexOf("--output-file") + 1];
+      writeFileSync(
+        `${output}.json`,
+        JSON.stringify({
+          result: { language: "es" },
+          transcription: [
+            {
+              tokens: [
+                { text: " Siempre", offsets: { from: 40_200, to: 40_490 } },
+                { text: " que", offsets: { from: 40_490, to: 40_700 } },
+              ],
+            },
+          ],
+        }),
+      );
+    }
+    return result;
+  });
+
+  const result = await transcribe(join(dir, "audio.wav"), dir, { model: "small", language: "es" });
+
+  const args = native.exec.mock.calls.find(([command]) => command === "whisper-cli")![1];
+  expect(args.slice(args.indexOf("--offset-t"), args.indexOf("--offset-t") + 2)).toEqual([
+    "--offset-t",
+    "40000",
+  ]);
+  expect(loadTranscript(result.transcriptPath).words).toEqual([
+    { id: "w0", text: "Siempre", start: 40.2, end: 40.49 },
+    { id: "w1", text: "que", start: 40.49, end: 40.7 },
+  ]);
+});
+
+it("keeps a soft first word even when quiet sound lasts more than three seconds", async () => {
+  const samples = new Float32Array(11 * 16_000).fill(2 / 32768);
+  samples.fill(0.1, 10 * 16_000);
+  writeFileSync(join(dir, "audio.wav"), encodeWav(samples, 16_000));
+
+  const result = await transcribe(join(dir, "audio.wav"), dir, { model: "small", language: "es" });
+
+  const args = native.exec.mock.calls.find(([command]) => command === "whisper-cli")![1];
+  expect(args).not.toContain("--offset-t");
+  expect(loadTranscript(result.transcriptPath).words).toEqual([
+    { id: "w0", text: "Hola", start: 0, end: 1 },
+  ]);
+});
 
 it("decodes multilingual audio automatically and returns the native detection", async () => {
   const result = await transcribe(join(dir, "audio.wav"), dir, { model: "small" });

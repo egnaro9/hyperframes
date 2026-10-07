@@ -38,3 +38,37 @@ export function readWav(path: string): { samples: Float32Array; sampleRate: numb
     samples[i] = buf.readInt16LE(data.offset + 2 * i) / 32768;
   return { samples, sampleRate: buf.readUInt32LE(fmt.offset + 4) };
 }
+
+export function leadingSilenceOffsetMs(buf: Buffer): number {
+  if (buf.toString("ascii", 0, 4) !== "RIFF" || buf.toString("ascii", 8, 12) !== "WAVE") return 0;
+  const fmt = findWavChunk(buf, "fmt ");
+  const data = findWavChunk(buf, "data");
+  if (
+    !fmt ||
+    fmt.size < 16 ||
+    !data ||
+    data.size % 2 !== 0 ||
+    buf.readUInt32LE(data.offset - 4) !== data.size ||
+    buf.readUInt16LE(fmt.offset) !== PCM ||
+    buf.readUInt16LE(fmt.offset + 2) !== 1 ||
+    buf.readUInt32LE(fmt.offset + 4) !== 16_000 ||
+    buf.readUInt32LE(fmt.offset + 8) !== 32_000 ||
+    buf.readUInt16LE(fmt.offset + 12) !== 2 ||
+    buf.readUInt16LE(fmt.offset + 14) !== 16
+  )
+    return 0;
+
+  const windowSamples = 1_600;
+  const end = data.offset + data.size;
+  let windows = 0;
+  for (let at = data.offset; at + 2 * windowSamples <= end; at += 2 * windowSamples) {
+    let sumSquared = 0;
+    for (let i = 0; i < windowSamples; i++) {
+      const sample = buf.readInt16LE(at + 2 * i);
+      sumSquared += sample * sample;
+    }
+    if (sumSquared > windowSamples) return windows >= 30 ? windows * 100 : 0;
+    windows++;
+  }
+  return 0;
+}
