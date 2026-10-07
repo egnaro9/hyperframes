@@ -1504,7 +1504,6 @@ export function hasHfColorGradingSecondaryValues(
   );
 }
 
-// An untouched hue curve normalizes to [], which the contract refuses (3+ points); a missing curve is identity.
 function authoredHueCurves(curves: NormalizedHfColorGradingHueCurves): HfColorGradingHueCurves {
   return Object.fromEntries(
     HF_COLOR_GRADING_HUE_CURVE_KEYS.filter((key) => curves[key].length > 0).map((key) => [

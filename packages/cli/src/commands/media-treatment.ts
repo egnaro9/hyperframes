@@ -385,13 +385,25 @@ function mergeGradingPatch(current: unknown, patch: unknown): unknown {
   return merged;
 }
 
+function withoutEmptyHueCurves(grading: unknown): unknown {
+  if (!isRecord(grading) || !isRecord(grading.hueCurves)) return grading;
+  const hueCurves = Object.fromEntries(
+    Object.entries(grading.hueCurves).filter(
+      ([, curve]) => !Array.isArray(curve) || curve.length > 0,
+    ),
+  );
+  return { ...grading, hueCurves };
+}
+
 function serializeGradingPatch(before: unknown, patch: unknown): string | null {
   assertKnownGradingShape(patch);
   if (isColorGradingVariableRef(before) && isRecord(patch)) {
     throw new Error("Cannot merge a grading patch into an unresolved whole-grade variable");
   }
   const current =
-    typeof before === "string" && !isColorGradingVariableRef(before) ? { preset: before } : before;
+    typeof before === "string" && !isColorGradingVariableRef(before)
+      ? { preset: before }
+      : withoutEmptyHueCurves(before);
   const grading = mergeGradingPatch(current, patch);
   assertKnownGradingShape(grading);
   if (containsColorGradingVariableRef(grading)) {

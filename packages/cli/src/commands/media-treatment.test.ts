@@ -294,6 +294,38 @@ describe("applyMediaTreatmentToHtml", () => {
     expect(repeated.after).toEqual(repeated.before);
   });
 
+  it("applies over a grading an earlier version wrote with empty hue curves, and writes it valid", () => {
+    const broken = JSON.stringify({
+      hueCurves: {
+        hueVsHue: [
+          [0, 0],
+          [120, 20],
+          [240, 0],
+        ],
+        hueVsSaturation: [],
+        hueVsLuma: [],
+      },
+    });
+    const html = VIDEO.replace('id="hero"', `id="hero" data-color-grading='${broken}'`);
+
+    const patched = applyMediaTreatmentToHtml(html, {
+      selector: "#hero",
+      grading: { adjust: { exposure: 0.1 } },
+    });
+
+    expect(patched.after).toMatchObject({
+      adjust: { exposure: 0.1 },
+      hueCurves: {
+        hueVsHue: [
+          [0, 0],
+          [120, 20],
+          [240, 0],
+        ],
+      },
+    });
+    expect(patched.after).not.toHaveProperty("hueCurves.hueVsSaturation");
+  });
+
   it("preserves unresolved variable references for runtime resolution", () => {
     const wholeGrade = applyMediaTreatmentToHtml(VIDEO, {
       selector: "#hero",
