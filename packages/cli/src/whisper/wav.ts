@@ -33,7 +33,8 @@ function isMonoPcm16Format(buf: Buffer, fmt: { offset: number; size: number } | 
   if (format === PCM) return true;
   if (format !== EXTENSIBLE || fmt.size < 40) return false;
   return (
-    buf.readUInt16LE(fmt.offset + 16) === 22 &&
+    buf.readUInt16LE(fmt.offset + 16) >= 22 &&
+    buf.readUInt16LE(fmt.offset + 16) <= fmt.size - 18 &&
     buf.readUInt16LE(fmt.offset + 18) === 16 &&
     buf
       .subarray(fmt.offset + 24, fmt.offset + 40)

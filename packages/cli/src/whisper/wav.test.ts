@@ -127,3 +127,22 @@ it("keeps audio when less than one second remains after a qualifying prefix", ()
   samples.fill(0.1, 48_000);
   expect(leadingSilenceOffsetMs(encodeWav(samples, 16_000))).toBe(0);
 });
+
+it("reads and scans PCM16 with a complete 24-byte extensible format", () => {
+  const samples = new Float32Array(4 * 16_000);
+  samples.fill(0.5, 3 * 16_000);
+  const standard = encodeExtensibleWav(samples, 16_000);
+  const extended = Buffer.concat([
+    standard.subarray(0, 60),
+    Buffer.from([0xab, 0xcd]),
+    standard.subarray(60),
+  ]);
+  extended.writeUInt32LE(extended.length - 8, 4);
+  extended.writeUInt32LE(42, 16);
+  extended.writeUInt16LE(24, 36);
+  const decoded = readWav(file("extended.wav", extended));
+  expect(decoded.sampleRate).toBe(16_000);
+  expect(decoded.samples).toHaveLength(64_000);
+  expect(decoded.samples[48_000]).toBe(0.5);
+  expect(leadingSilenceOffsetMs(extended)).toBe(3000);
+});
