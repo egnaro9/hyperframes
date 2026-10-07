@@ -1847,6 +1847,17 @@ describe("bundleToSingleHtml", () => {
     expect(styleText(inlined)).toContain(inlinedAs("image/png", "escaped-space-image"));
   });
 
+  it("removes CSS line continuations before rebasing linked stylesheet URLs", async () => {
+    const dir = makeTempProject({
+      "index.html": `<link rel="stylesheet" href="css/theme.css"><div data-composition-id="root" data-width="320" data-height="180"></div>`,
+      "css/theme.css": '.bg { background: url("icon\\\n1.png"); }',
+      "css/icon1.png": "continued-image",
+    });
+
+    const linked = await bundleToSingleHtml(dir, { inlineAssets: false });
+    expect(styleText(linked)).toContain('url("css/icon1.png")');
+  });
+
   it("rebases url() paths with ../ traversal in nested @import", async () => {
     const dir = makeTempProject({
       "index.html": `<!doctype html>
