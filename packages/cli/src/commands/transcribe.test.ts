@@ -299,6 +299,15 @@ echo '{"sentences":[{"tokens":[{"text":" hola","start":0,"end":1}]}]}' > "$2/$(b
       expect(await transcribeWith("auto", both, "AUTO")).toMatchObject({ engine: "parakeet" });
     });
 
+    it("hands --language auto to whisper as is, so its model choice can drop .en", async () => {
+      await transcribeWith("whisper", { sherpa: true, mlx: true }, "auto");
+      expect(transcribeMock).toHaveBeenLastCalledWith(
+        expect.anything(),
+        expect.anything(),
+        expect.objectContaining({ language: "auto" }),
+      );
+    });
+
     it("--engine parakeet with a language it does not transcribe fails without falling back", async () => {
       Object.assign(runners, { sherpa: true, mlx: true });
       const { exitCode, out } = await transcribeFails("parakeet", { language: "ja" });

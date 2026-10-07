@@ -356,3 +356,14 @@ it("a detection that times out stops the rest, so a hung whisper-cli costs one t
   expect(detections()).toBe(1);
   expect(languagePassed()).toEqual(["auto"]);
 });
+
+it("--language auto with an English-only model detects with the multilingual one", async () => {
+  musicThenSpanish();
+  detectsByWindow((sample) => (sample === 2 ? "en (p = 0.534956)" : "es (p = 0.983324)"));
+  const result = await transcribe(join(dir, "audio.wav"), dir, {
+    model: "small.en",
+    language: "auto",
+  });
+  expect(result).toMatchObject({ model: "small", detectedLanguage: "es" });
+  expect(languagePassed()).toEqual(["es"]);
+});
