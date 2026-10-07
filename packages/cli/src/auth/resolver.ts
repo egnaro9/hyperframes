@@ -7,9 +7,8 @@
  *   3. `HEYGEN_ACCESS_TOKEN` env (host-managed OAuth)
  *   4. `~/.heygen/credentials` (JSON) — unexpired OAuth, else api_key
  *
- * Absent sources fall through. A broken file (parse error, bad shape)
- * surfaces immediately as `ErrInvalidStore` — silently falling back
- * would mask user config bugs.
+ * Absent sources fall through. Broken files surface `ErrInvalidStore` immediately;
+ * silently falling back would mask user configuration errors.
  *
  * Expiry policy: an OAuth access_token whose `expires_at` is in the
  * past (60s skew) is considered expired. If a `refresh_token` is also
