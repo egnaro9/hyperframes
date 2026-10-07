@@ -121,6 +121,21 @@ describe("applyVariableBindings", () => {
     expect(document.getElementById("top")?.textContent).toBe("TopLevel");
   });
 
+  it("gives each mounted instance of one sub-composition its own host's values", () => {
+    // Compiled shape: the sub-composition keeps its own root (authored id "card") inside each
+    // host, while the per-instance values are keyed by the host ids.
+    win.__hfVariablesByComp = { "card-a": { title: "Alpha" }, "card-b": { title: "Bravo" } };
+    const card = `<div data-composition-id="card"><h1 data-var-text="title">Default</h1></div>`;
+    document.body.innerHTML = `
+      <div data-hf-root data-composition-id="main">
+        <div id="a" data-composition-file="compositions/card.html" data-composition-id="card-a">${card}</div>
+        <div id="b" data-composition-src="compositions/card.html" data-composition-id="card-b">${card}</div>
+      </div>`;
+    applyVariableBindings(document);
+    expect(document.querySelector("#a h1")?.textContent).toBe("Alpha");
+    expect(document.querySelector("#b h1")?.textContent).toBe("Bravo");
+  });
+
   describe("security", () => {
     it("refuses data-var-src on a non-media tag (XSS sink)", () => {
       win.__hfVariables = { evil: "javascript:alert(document.cookie)" };
