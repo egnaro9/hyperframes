@@ -117,9 +117,13 @@ describe("applyMediaTreatmentToHtml", () => {
   });
 
   it("warns that an animated property overrides the payload, instead of asking for an inline start", () => {
-    const rules = getMediaTreatmentCapabilityDetail("blur")?.animation?.rules ?? [];
-    expect(rules.join(" ")).toContain("overrides the payload's value");
-    expect(rules.some((rule) => rule.startsWith("Author the initial value inline"))).toBe(false);
+    const detail = getMediaTreatmentCapabilityDetail("blur");
+    expect(detail).toMatchObject({
+      animation: {
+        rules: expect.arrayContaining([expect.stringContaining("overrides the payload's value")]),
+      },
+    });
+    expect(JSON.stringify(detail)).not.toContain("Author the initial value inline");
   });
 
   it("rejects unknown capability lookups", () => {
@@ -330,6 +334,19 @@ describe("applyMediaTreatmentToHtml", () => {
       },
     });
     expect(patched.after).not.toHaveProperty("hueCurves.hueVsSaturation");
+  });
+
+  it("rejects unknown empty hue curves instead of healing them", () => {
+    const html = VIDEO.replace(
+      'id="hero"',
+      `id="hero" data-color-grading='{"hueCurves":{"bogus":[]}}'`,
+    );
+    expect(() =>
+      applyMediaTreatmentToHtml(html, {
+        selector: "#hero",
+        grading: { adjust: { exposure: 0.1 } },
+      }),
+    ).toThrow(/hueCurves.*unsupported key.*bogus/);
   });
 
   it("preserves unresolved variable references for runtime resolution", () => {

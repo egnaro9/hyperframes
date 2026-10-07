@@ -2,6 +2,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import {
   HF_COLOR_GRADING_ATTR,
+  HF_COLOR_GRADING_HUE_CURVE_KEYS,
   getHfColorGradingCapabilities,
   hasHfColorGradingAuthoredValues,
   isPathInside,
@@ -389,7 +390,10 @@ function withoutEmptyHueCurves(grading: unknown): unknown {
   if (!isRecord(grading) || !isRecord(grading.hueCurves)) return grading;
   const hueCurves = Object.fromEntries(
     Object.entries(grading.hueCurves).filter(
-      ([, curve]) => !Array.isArray(curve) || curve.length > 0,
+      ([key, curve]) =>
+        !HF_COLOR_GRADING_HUE_CURVE_KEYS.some((knownKey) => knownKey === key) ||
+        !Array.isArray(curve) ||
+        curve.length > 0,
     ),
   );
   return { ...grading, hueCurves };
