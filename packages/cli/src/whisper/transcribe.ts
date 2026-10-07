@@ -3,15 +3,7 @@ import { execFile, execFileSync } from "node:child_process";
 import { once } from "node:events";
 import { createInterface } from "node:readline";
 import type { Readable } from "node:stream";
-import {
-  existsSync,
-  readFileSync,
-  mkdirSync,
-  mkdtempSync,
-  rmSync,
-  statSync,
-  unlinkSync,
-} from "node:fs";
+import { existsSync, readFileSync, mkdirSync, rmSync, statSync, unlinkSync } from "node:fs";
 import { join, extname } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
@@ -38,7 +30,7 @@ const AUDIO_PREPARATION_TIMEOUT_PER_MEDIA_SECOND_MS = 500;
 const AUDIO_PREPARATION_TIMEOUT_CAP_MS = 21_600_000;
 
 /**
- * Model-specific slowdown factors relative to the `small.en` default. whisper.cpp's
+ * Model-specific slowdown factors relative to the `small` default. whisper.cpp's
  * per-token inference cost scales with model size — `medium` runs ~2x slower than
  * `small`, and the `large` family ~4x slower — so the 10x-realtime baseline that
  * comfortably covers `small.en` can still time out on `medium.en`/`large-v3` when
@@ -65,13 +57,13 @@ const WHISPER_MODEL_SLOWDOWN_FACTORS: Readonly<Record<string, number>> = {
   "large-v3-turbo": 2,
 };
 
-// Unknown model names fall back to the `small.en` baseline so the returned
+// Unknown model names fall back to the `small` baseline so the returned
 // timeout never dips below the historical safe window for a novel/custom model.
 const DEFAULT_MODEL_SLOWDOWN_FACTOR = 1;
 
 /**
  * Look up the auto-scale slowdown factor for a whisper model name. Case-
- * insensitive. Unknown names fall back to the `small.en` baseline (factor 1)
+ * insensitive. Unknown names fall back to the `small` baseline (factor 1)
  * rather than a smaller factor so unknown models never accidentally shorten
  * the safety window.
  */
@@ -488,7 +480,9 @@ export async function transcribe(
   // 3. Prepare audio
   const wavPath = prepareWav(inputPath, options?.onProgress);
 
-  const automaticLanguage = options?.language === undefined && !model.endsWith(".en");
+  // `--language auto` asks for detection too; Desktop always sends it.
+  const requested = options?.language === "auto" ? undefined : options?.language;
+  const automaticLanguage = requested === undefined && !model.endsWith(".en");
   const wavSeconds = getPreparedWavDurationSeconds(wavPath);
   const speechOnsetSeconds = detectSpeechOnset(wavPath);
   const signal = options?.startCancellation?.();
@@ -500,7 +494,7 @@ export async function transcribe(
         onProgress: options?.onProgress,
       })
     : null;
-  const language = options?.language ?? picked ?? (automaticLanguage ? "auto" : "en");
+  const language = requested ?? picked ?? (automaticLanguage ? "auto" : "en");
   options?.onProgress?.("Transcribing...");
   options?.onEvent?.({
     type: "progress",
@@ -636,9 +630,8 @@ function segmentWords(line: string): { words: Word[]; end: number } | null {
   return { words, end };
 }
 
-/** Resolves once whisper exits and both its streams are read, so no printed line is lost. */
 /** The language up to three windows spread over the speech agree on; null keeps whisper's own pick, which hears
- * only the first 30 s (a music intro decided whole clips). A failed detection keeps it too, said aloud. */
+ * only the first 30 s. A window whose detection fails loses its vote, said aloud. */
 async function languageFromWindows(
   executable: string,
   { model, modelPath }: { model: string; modelPath: string },
@@ -653,37 +646,38 @@ async function languageFromWindows(
   const starts = clip.seconds === null ? [] : detectionWindows(clip.seconds, clip.onset);
   if (starts.length === 0) return null;
   clip.onProgress?.("Detecting the language...");
-  const dir = mkdtempSync(join(tmpdir(), "hyperframes-language-"));
+  const window = tempWavPath();
+  const votes: LanguageVote[] = [];
   try {
-    const votes: LanguageVote[] = [];
-    for (const [i, start] of starts.entries()) {
-      const window = join(dir, `${i}.wav`);
-      writeWavWindow(wavPath, window, start, WINDOW_SECONDS);
-      await runWhisper(
-        executable,
-        ["--model", modelPath, "--language", "auto", "--detect-language", window],
-        {
-          timeoutMs: resolveWhisperTimeoutMs(WINDOW_SECONDS, { model }),
-          signal: clip.signal,
-          onStderr: (line) => {
-            const vote = parseDetection(line);
-            if (vote) votes.push(vote);
+    for (const start of starts) {
+      try {
+        writeWavWindow(wavPath, window, start, WINDOW_SECONDS);
+        await runWhisper(
+          executable,
+          ["--model", modelPath, "--language", "auto", "--detect-language", window],
+          {
+            timeoutMs: resolveWhisperTimeoutMs(WINDOW_SECONDS, { model }),
+            signal: clip.signal,
+            onStderr: (line) => {
+              const vote = parseDetection(line);
+              if (vote) votes.push(vote);
+            },
           },
-        },
-      );
+        );
+      } catch (err) {
+        if (clip.signal?.aborted) throw err;
+        clip.onProgress?.(
+          `Language detection failed for one window (${normalizeErrorMessage(err)}).`,
+        );
+      }
     }
-    return pickLanguage(votes);
-  } catch (err) {
-    if (clip.signal?.aborted) throw err;
-    clip.onProgress?.(
-      `Language detection failed (${normalizeErrorMessage(err)}); whisper picks it.`,
-    );
-    return null;
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    rmSync(window, { force: true });
   }
+  return pickLanguage(votes);
 }
 
+/** Resolves once whisper exits and both its streams are read, so no printed line is lost. */
 async function runWhisper(
   executable: string,
   args: string[],

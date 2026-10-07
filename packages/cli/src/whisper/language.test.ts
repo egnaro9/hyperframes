@@ -2,8 +2,12 @@ import { describe, expect, it } from "vitest";
 import { detectionWindows, parseDetection, pickLanguage } from "./language.js";
 
 describe("detectionWindows", () => {
-  it("leaves a clip under a minute to whisper's own pick", () => {
+  it("leaves a clip under a minute with no intro, or under 30 s of speech, to whisper's own pick", () => {
     expect(detectionWindows(59, null)).toEqual([]);
+    expect(detectionWindows(69, 40)).toEqual([]);
+  });
+  it("puts all three windows on the speech after an intro, overlapping when it is short", () => {
+    expect(detectionWindows(90, 40)).toEqual([40, 50, 60]);
   });
   it("spreads three 30 s windows over the clip, centred at a sixth, a half and five sixths", () => {
     expect(detectionWindows(120, null)).toEqual([5, 45, 85]);
@@ -30,8 +34,10 @@ describe("pickLanguage", () => {
   });
 });
 
-it("reads whisper-cli's detection line", () => {
-  const line = "whisper_full_with_state: auto-detected language: es (p = 0.989864)";
-  expect(parseDetection(line)).toEqual({ language: "es", p: 0.989864 });
-  expect(parseDetection("whisper_init_from_file: loading model")).toBeNull();
+describe("parseDetection", () => {
+  it("reads whisper-cli's detection line", () => {
+    const line = "whisper_full_with_state: auto-detected language: es (p = 0.989864)";
+    expect(parseDetection(line)).toEqual({ language: "es", p: 0.989864 });
+    expect(parseDetection("whisper_init_from_file: loading model")).toBeNull();
+  });
 });
