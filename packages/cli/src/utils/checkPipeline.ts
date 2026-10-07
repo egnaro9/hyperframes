@@ -1,3 +1,4 @@
+import { findingElementKey, groupSampledFindings } from "./checkFindings.js";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { trackCheckReport, trackCommandFailure } from "../telemetry/events.js";
@@ -1325,13 +1326,13 @@ function contrastFailureHeld(
   const failureSamples = new Map<string, Set<number>>();
   for (const entry of entries) {
     if (entry.wcagAA) continue;
-    const key = `${entry.selector}|${entry.text}`;
+    const key = findingElementKey(entry);
     const times = failureSamples.get(key) ?? new Set<number>();
     times.add(entry.time);
     failureSamples.set(key, times);
   }
   return (entry) =>
-    sampledTimes < 2 || (failureSamples.get(`${entry.selector}|${entry.text}`)?.size ?? 0) >= 2;
+    sampledTimes < 2 || (failureSamples.get(findingElementKey(entry))?.size ?? 0) >= 2;
 }
 
 function buildContrastResults(entries: ContrastAuditEntry[]): {
@@ -1366,7 +1367,13 @@ function buildContrastResults(entries: ContrastAuditEntry[]): {
       time: entry.time,
     });
   }
-  return { findings, passed };
+  return {
+    findings: groupSampledFindings(
+      findings,
+      (next, current) => current.ratio / current.requiredRatio - next.ratio / next.requiredRatio,
+    ),
+    passed,
+  };
 }
 
 function suggestedColor(fg: string, bg: string, requiredRatio: number): string {
@@ -1508,7 +1515,9 @@ function shapeLayoutFindings(
   const all = options.collapseStatic
     ? collapseStaticLayoutIssues(deduped, totalSampleCount)
     : deduped;
-  const limited = limitLayoutIssues(all, options.maxIssues);
+  const anchored = all.map(ensureAnchoredLayoutIssue);
+  const grouped = options.collapseStatic ? groupSampledFindings(anchored) : anchored;
+  const limited = limitLayoutIssues(grouped, options.maxIssues);
   return {
     findings: limited.issues.map(ensureAnchoredLayoutIssue),
     totalIssueCount: limited.totalIssueCount,

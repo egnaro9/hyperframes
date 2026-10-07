@@ -48,6 +48,7 @@ export interface LayoutIssue {
   code: LayoutIssueCode;
   severity: LayoutIssueSeverity;
   time: number;
+  times?: number[];
   firstSeen?: number;
   lastSeen?: number;
   occurrences?: number;
@@ -141,10 +142,12 @@ export function summarizeLayoutIssues(issues: LayoutIssue[]): LayoutSummary {
 }
 
 export function formatLayoutIssue(issue: LayoutIssue): string {
-  const timeLabel =
-    issue.occurrences && issue.occurrences > 1
-      ? `t=${formatNumber(issue.firstSeen ?? issue.time)}-${formatNumber(issue.lastSeen ?? issue.time)}s (${issue.occurrences} samples)`
-      : `t=${formatNumber(issue.time)}s`;
+  let timeLabel = `t=${formatNumber(issue.time)}s`;
+  if (issue.times) {
+    timeLabel = `t=${issue.times.map(formatNumber).join(", ")}s`;
+  } else if (issue.occurrences && issue.occurrences > 1) {
+    timeLabel = `t=${formatNumber(issue.firstSeen ?? issue.time)}-${formatNumber(issue.lastSeen ?? issue.time)}s (${issue.occurrences} samples)`;
+  }
   const parts = [
     timeLabel,
     issue.code,
@@ -164,6 +167,7 @@ export function dedupeLayoutIssues(issues: LayoutIssue[]): LayoutIssue[] {
 
   for (const issue of issues) {
     const key = [
+      Reflect.get(issue, "sourceFile") ?? "",
       issue.code,
       issue.severity,
       issue.time.toFixed(3),
@@ -263,6 +267,7 @@ export function collapseStaticLayoutIssues(
         lastSeen,
         occurrences,
         heldMs: longestContiguousRunMs(times),
+        times: [...new Set(times)].sort((a, b) => a - b),
       },
       multiSampleRun,
     ),
@@ -375,6 +380,7 @@ function severityRank(severity: LayoutIssueSeverity): number {
 
 function staticIssueKey(issue: LayoutIssue): string {
   return [
+    Reflect.get(issue, "sourceFile") ?? "",
     issue.code,
     issue.severity,
     issue.selector,

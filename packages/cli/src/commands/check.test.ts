@@ -861,7 +861,7 @@ it("suppresses frame breaches below the per-canvas floor and reports those above
   ]);
 });
 
-it("keeps frame findings at distinct rounded positions across requested seeks", async () => {
+it("reports one moving element rule with both requested seek times", async () => {
   const collectGeometryCandidates = vi.fn(async (time: number) => [
     geometryCandidate({
       kind: "media",
@@ -886,8 +886,12 @@ it("keeps frame findings at distinct rounded positions across requested seeks", 
   );
 
   expect(report.layout.findings).toEqual([
-    expect.objectContaining({ code: "frame_out_of_frame", time: 2 }),
-    expect.objectContaining({ code: "frame_out_of_frame", time: 6 }),
+    expect.objectContaining({
+      code: "frame_out_of_frame",
+      time: 2,
+      times: [2, 6],
+      bbox: { x: 1920, y: 100, width: 130, height: 100 },
+    }),
   ]);
 });
 
@@ -1686,6 +1690,109 @@ describe("layout flag grammar", () => {
     expect(collectLayout).toHaveBeenCalledWith(expect.any(Number), expect.any(Number), {
       proseCoverageFloor: 0.05,
     });
+  });
+});
+
+describe("sampled finding reporting", () => {
+  it("reports held low contrast once with every occurrence time in JSON and terminal output", async () => {
+    const times = [0.111, 0.556, 1, 1.444, 1.889];
+    const { report } = await runScenario(
+      fakeDriver({
+        getDuration: vi.fn(async () => 2),
+        collectContrast: vi.fn(async (time: number) => ({
+          entries: [contrastEntry({ time, selector: "#low", ratio: time === 1 ? 1.2 : 2.5 })],
+          pngBase64: PNG_BASE64,
+        })),
+      }),
+      { samples: 5, at: times },
+    );
+    expect(report.contrast.findings).toEqual([
+      expect.objectContaining({
+        selector: "#low",
+        severity: "error",
+        times,
+        time: 1,
+        ratio: 1.2,
+      }),
+    ]);
+    expect(report.contrast.errorCount).toBe(1);
+    expect(report.contrast.checked).toBe(5);
+    expect(checkExitCode(report)).toBe(1);
+    const command = createCheckCommand({
+      resolveProject: () => PROJECT,
+      runPipeline: vi.fn(async () => report),
+      withMeta: (value) => value,
+    });
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    await runCommand(command, { rawArgs: [] });
+    const output = log.mock.calls.map(([line]) => String(line)).join("\n");
+    expect(output.match(/#low/g)).toHaveLength(1);
+    expect(output).toContain("t=0.111, 0.556, 1, 1.444, 1.889s");
+    log.mockClear();
+    await runCommand(command, { rawArgs: ["--json"] });
+    expect(JSON.parse(String(log.mock.calls[0]?.[0])).contrast.findings).toEqual(
+      report.contrast.findings,
+    );
+  });
+
+  it("keeps same-selector contrast failures in separate source files and grades each independently", async () => {
+    const { report } = await runScenario(
+      fakeDriver({
+        collectContrast: vi.fn(async (time: number) => ({
+          entries: [
+            contrastEntry({
+              time,
+              selector: "#low",
+              sourceFile: time < 1 ? "index.html" : "compositions/scene.html",
+            }),
+          ],
+          pngBase64: PNG_BASE64,
+        })),
+      }),
+      { samples: 2, at: [0.5, 1.5] },
+    );
+    expect(report.contrast.findings).toEqual([
+      expect.objectContaining({ sourceFile: "index.html", severity: "warning", times: [0.5] }),
+      expect.objectContaining({
+        sourceFile: "compositions/scene.html",
+        severity: "warning",
+        times: [1.5],
+      }),
+    ]);
+  });
+
+  it("keeps same-selector layout findings from separate source files", async () => {
+    const { report } = await runScenario(
+      fakeDriver({
+        collectLayout: vi.fn(async (time: number) => [
+          {
+            ...layoutIssue("error", { time }),
+            sourceFile: time < 1 ? "index.html" : "compositions/scene.html",
+          },
+        ]),
+      }),
+      { contrast: false, samples: 2, at: [0.5, 1.5] },
+    );
+    expect(report.layout.findings).toEqual([
+      expect.objectContaining({ sourceFile: "index.html", times: [0.5] }),
+      expect.objectContaining({ sourceFile: "compositions/scene.html", times: [1.5] }),
+    ]);
+  });
+
+  it("reports an element's repeated layout rule once even when its text changes", async () => {
+    const { report } = await runScenario(
+      fakeDriver({
+        collectLayout: vi.fn(async (time: number) => [
+          {
+            ...layoutIssue("error", { time }),
+            text: time < 1 ? "First" : "Changed",
+          },
+        ]),
+      }),
+      { contrast: false, samples: 2, at: [0.5, 1.5] },
+    );
+    expect(report.layout.findings).toHaveLength(1);
+    expect(report.layout.findings[0]).toMatchObject({ code: "clipped_text", times: [0.5, 1.5] });
   });
 });
 
