@@ -1858,6 +1858,52 @@ describe("bundleToSingleHtml", () => {
     expect(styleText(linked)).toContain('url("css/icon1.png")');
   });
 
+  it("preserves escaped leading spaces as part of linked CSS asset identity", async () => {
+    const dir = makeTempProject({
+      "index.html": `<link rel="stylesheet" href="css/theme.css"><div data-composition-id="root" data-width="320" data-height="180"></div>`,
+      "css/theme.css": String.raw`.bg { background: url(\ image.png); }`,
+      "css/ image.png": "leading-space-image",
+      "css/image.png": "different-image",
+    });
+
+    const linked = await bundleToSingleHtml(dir, { inlineAssets: false });
+    expect(styleText(linked)).toContain("url(css/%20image.png)");
+    const inlined = await bundleToSingleHtml(dir);
+    expect(styleText(inlined)).toContain(inlinedAs("image/png", "leading-space-image"));
+    expect(styleText(inlined)).not.toContain(inlinedAs("image/png", "different-image"));
+  });
+
+  it.each([
+    ["", String.raw`?v=\ 1`, String.raw`?v=\0000201`],
+    ['"', String.raw`?v=\22 1`, String.raw`?v=\0000221`],
+    ['"', String.raw`?v=\22`, String.raw`?v=\000022`],
+    ['"', String.raw`?v=\3c /style\3e 1`, String.raw`?v=\00003c/style\00003e1`],
+  ])("escapes decoded CSS URL suffixes with delimiter %j", async (quote, suffix, escaped) => {
+    const dir = makeTempProject({
+      "index.html": `<link rel="stylesheet" href="css/theme.css"><div data-composition-id="root" data-width="320" data-height="180"></div>`,
+      "css/theme.css": `.bg { background: url(${quote}icon.png${suffix}${quote}); }`,
+      "css/icon.png": "suffix-image",
+    });
+
+    const linked = await bundleToSingleHtml(dir, { inlineAssets: false });
+    expect(styleText(linked)).toContain(`url(${quote}css/icon.png${escaped}${quote})`);
+    const inlined = await bundleToSingleHtml(dir);
+    expect(styleText(inlined)).toContain(inlinedAs("image/png", "suffix-image"));
+  });
+
+  it("normalizes CSS nulls before resolving linked stylesheet assets", async () => {
+    const dir = makeTempProject({
+      "index.html": `<link rel="stylesheet" href="css/theme.css"><div data-composition-id="root" data-width="320" data-height="180"></div>`,
+      "css/theme.css": ".bg { background: url(\0.png); }",
+      "css/\uFFFD.png": "replacement-character-image",
+    });
+
+    const linked = await bundleToSingleHtml(dir, { inlineAssets: false });
+    expect(styleText(linked)).toContain("url(css/%EF%BF%BD.png)");
+    const inlined = await bundleToSingleHtml(dir);
+    expect(styleText(inlined)).toContain(inlinedAs("image/png", "replacement-character-image"));
+  });
+
   it("rebases url() paths with ../ traversal in nested @import", async () => {
     const dir = makeTempProject({
       "index.html": `<!doctype html>

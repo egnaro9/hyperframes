@@ -13,8 +13,8 @@ describe("URL filename identity", () => {
   it("removes URL suffixes before decoding encoded filename punctuation exactly once", () => {
     expect(decodedUrlPath("a%2520%3F%23.png?cache=1#view")).toBe("a%20?#.png");
   });
-  it("replaces invalid CSS escaped code points before URL encoding", () => {
-    for (const escaped of [String.raw`\0`, String.raw`\d800`, String.raw`\110000`]) {
+  it("normalizes CSS nulls and invalid escaped code points before URL encoding", () => {
+    for (const escaped of ["\0", String.raw`\0`, String.raw`\d800`, String.raw`\110000`]) {
       expect(decodeCssEscapes(escaped)).toBe("\uFFFD");
     }
   });

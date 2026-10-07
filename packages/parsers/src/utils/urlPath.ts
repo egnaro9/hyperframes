@@ -35,18 +35,20 @@ export function encodeUrlPath(path: string): string {
 }
 
 export function decodeCssEscapes(text: string): string {
-  return text.replace(
-    /\\(?:([0-9a-f]{1,6})(?:\r\n|[ \t\r\n\f])?|(\r\n|[\n\r\f])|([\s\S]))/gi,
-    (
-      _escaped,
-      hex: string | undefined,
-      lineBreak: string | undefined,
-      char: string | undefined,
-    ) => {
-      if (hex === undefined) return lineBreak === undefined ? char! : "";
-      const code = Number.parseInt(hex, 16);
-      if (code === 0 || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)) return "\uFFFD";
-      return String.fromCodePoint(code);
-    },
-  );
+  return text
+    .replace(/\0/g, "\uFFFD")
+    .replace(
+      /\\(?:([0-9a-f]{1,6})(?:\r\n|[ \t\r\n\f])?|(\r\n|[\n\r\f])|([\s\S]))/gi,
+      (
+        _escaped,
+        hex: string | undefined,
+        lineBreak: string | undefined,
+        char: string | undefined,
+      ) => {
+        if (hex === undefined) return lineBreak === undefined ? char! : "";
+        const code = Number.parseInt(hex, 16);
+        if (code === 0 || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)) return "\uFFFD";
+        return String.fromCodePoint(code);
+      },
+    );
 }

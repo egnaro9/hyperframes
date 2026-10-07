@@ -145,14 +145,18 @@ function rebaseCssUrls(css: string, cssFileDir: string, projectDir: string): str
   const resolvedDir = resolve(cssFileDir);
   if (resolvedDir === resolvedRoot) return css;
   return css.replace(CSS_URL_RE, (full, quote: string, urlValue: string) => {
-    const decoded = decodeCssEscapes(urlValue).trim();
+    const decoded = decodeCssEscapes(urlValue);
     if (!decoded || !isRelativeUrl(decoded)) return full;
     const { basePath, suffix } = splitUrlSuffix(decoded);
     if (!basePath) return full;
     const absolutePath = resolve(resolvedDir, decodeWellFormedEscapes(basePath));
     const rebased = encodeUrlPath(relative(resolvedRoot, absolutePath).split(sep).join("/"));
     if (rebased === basePath) return full;
-    return `url(${quote || ""}${rebased}${suffix}${quote || ""})`;
+    const escapedSuffix = suffix.replace(
+      /[\x00-\x20\x7f"'()\\<>]/g,
+      (char) => `\\${char.charCodeAt(0).toString(16).padStart(6, "0")}`,
+    );
+    return `url(${quote || ""}${rebased}${escapedSuffix}${quote || ""})`;
   });
 }
 
