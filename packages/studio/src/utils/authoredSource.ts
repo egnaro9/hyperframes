@@ -98,6 +98,7 @@ export function authoredMarkup(authored: Element, live: Element, sourceFile: str
 export function liveMarkupWithoutPreviewMarks(live: Element): string {
   const copy = live.cloneNode(true) as Element;
   for (const el of [copy, ...Array.from(copy.querySelectorAll("*"))]) {
+    el.removeAttribute("data-hf-variable-host");
     el.removeAttribute(STUDIO_PREVIEW_UPCOMING_ATTR);
     if (!el.hasAttribute(STUDIO_PREVIEW_LAZY_ATTR)) continue;
     el.removeAttribute("loading");

@@ -12,18 +12,13 @@ type VariablesWindow = Window & {
   __hyperframes?: { getVariables?: () => Record<string, unknown> };
 };
 
-/** The element whose `data-composition-id` keys `element`'s per-instance values: a mounted
- * sub-composition root with no values of its own defers to its direct parent, the host. */
+export const VARIABLE_HOST_ATTR = "data-hf-variable-host";
+
 export function variableScopeOf(element: Element): Element | null {
   const scope = element.closest("[data-composition-id]");
-  const byComp = (window as VariablesWindow).__hfVariablesByComp;
-  if (!scope || !byComp || hasScopedValues(byComp, scope)) return scope;
-  return scope.parentElement ?? scope;
-}
-
-function hasScopedValues(byComp: Record<string, unknown>, el: Element): boolean {
-  const id = el.getAttribute("data-composition-id")?.trim();
-  return !!id && Object.hasOwn(byComp, id);
+  if (!scope || scope.hasAttribute(VARIABLE_HOST_ATTR)) return scope;
+  const host = scope.parentElement?.closest(`[${VARIABLE_HOST_ATTR}]`);
+  return host?.hasAttribute("data-composition-id") ? host : scope;
 }
 
 export function readVariablesForElement(element: Element): Record<string, unknown> {

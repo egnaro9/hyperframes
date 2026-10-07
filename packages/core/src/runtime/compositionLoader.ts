@@ -1,3 +1,4 @@
+import { VARIABLE_HOST_ATTR } from "./variableScope";
 import {
   SVG_REFERENCE_ALIASES_ATTR,
   readSvgReferenceAliases,
@@ -5,6 +6,7 @@ import {
 } from "../compiler/svgSelectorAliases";
 import {
   planCompositionAssembly,
+  nestedCompositionRefusal,
   EXTRACTED_COMPOSITION_ASSET_SELECTOR,
 } from "../compiler/compositionAssembly";
 import {
@@ -580,6 +582,8 @@ async function mountCompositionContent(params: {
     stripExtractedCompositionAssets(params.host);
   }
 
+  params.host.setAttribute(VARIABLE_HOST_ATTR, "");
+
   // Stash the per-instance variables BEFORE running scripts. The scoped
   // `getVariables()` injected by `compositionScoping.ts` reads from
   // `window.__hfVariablesByComp[compId]`, so this table must be populated
@@ -708,125 +712,144 @@ async function mountInlineTemplateCompositions(
 
 async function mountExternalCompositions(
   params: LoadCompositionsParams,
+  attemptedPaths: Map<Element, readonly string[]>,
+  mountedHosts: ReadonlySet<Element>,
 ): Promise<MountedComposition[]> {
   const trackedHosts = getTrackedCompositionHosts();
   cleanupDetachedScopedVariables();
   if (trackedHosts.length === 0) return [];
-  const hostIdentityByElement = assignRuntimeCompositionIds(trackedHosts, new Set());
-  const hosts = trackedHosts.filter((host) => host.hasAttribute("data-composition-src"));
+  const hostIdentityByElement = assignRuntimeCompositionIds(trackedHosts, mountedHosts);
+  const hosts = trackedHosts.filter((host) => {
+    if (!host.hasAttribute("data-composition-src") || attemptedPaths.has(host)) return false;
+    const parent = host.parentElement?.closest("[data-composition-src]");
+    return !parent || attemptedPaths.has(parent);
+  });
 
-  const mounted = await Promise.all(
-    hosts.map(async (host): Promise<MountedComposition | null> => {
-      const src = host.getAttribute("data-composition-src");
-      if (!src) return null;
-      const hostIdentity = hostIdentityByElement.get(host);
-      const authoredCompositionId = hostIdentity?.authoredCompositionId || null;
-      const runtimeCompositionId =
-        hostIdentity?.runtimeCompositionId || authoredCompositionId || null;
-      let compositionUrl: URL | null = null;
-      try {
-        compositionUrl = new URL(src, document.baseURI);
-      } catch {
-        compositionUrl = null;
-      }
-      resetCompositionHost(host);
-      const failed = (error: unknown) => {
-        params.onDiagnostic?.({
-          code: "external_composition_load_failed",
-          details: {
-            hostCompositionId: authoredCompositionId,
-            runtimeCompositionId,
-            hostCompositionSrc: src,
-            errorMessage: error instanceof Error ? error.message : "unknown_error",
-          },
-        });
-        // Keep host empty on load failures to avoid rendering escaped fallback HTML.
+  const mounted: Array<MountedComposition | null> = [];
+  for (let offset = 0; offset < hosts.length; offset += 4) {
+    const batch = await Promise.all(
+      hosts.slice(offset, offset + 4).map(async (host): Promise<MountedComposition | null> => {
+        const src = host.getAttribute("data-composition-src");
+        if (!src) return null;
+        const hostIdentity = hostIdentityByElement.get(host);
+        const authoredCompositionId = hostIdentity?.authoredCompositionId || null;
+        const runtimeCompositionId =
+          hostIdentity?.runtimeCompositionId || authoredCompositionId || null;
+        const parent = host.parentElement?.closest("[data-composition-src]");
+        const ancestry = (parent && attemptedPaths.get(parent)) || [];
+        let compositionUrl: URL | null = null;
+        try {
+          compositionUrl = new URL(src, ancestry.at(-1) ?? document.baseURI);
+        } catch {
+          compositionUrl = null;
+        }
+        const resolvedSrc = compositionUrl?.href ?? src;
+        attemptedPaths.set(host, [...ancestry, resolvedSrc]);
         resetCompositionHost(host);
-      };
-      const mount = async (mountParams: Parameters<typeof mountCompositionContent>[0]) => {
-        const composition = await mountCompositionContent(mountParams);
-        const runScripts = composition.runScripts;
-        composition.runScripts = async () => {
-          try {
-            await runScripts();
-          } catch (error) {
-            failed(error);
-          }
+        const failed = (error: unknown) => {
+          params.onDiagnostic?.({
+            code: "external_composition_load_failed",
+            details: {
+              hostCompositionId: authoredCompositionId,
+              runtimeCompositionId,
+              hostCompositionSrc: src,
+              errorMessage: error instanceof Error ? error.message : "unknown_error",
+            },
+          });
+          // Keep host empty on load failures to avoid rendering escaped fallback HTML.
+          resetCompositionHost(host);
         };
-        return composition;
-      };
-      try {
-        const localTemplate =
-          authoredCompositionId != null
-            ? document.querySelector<HTMLTemplateElement>(
-                `template#${CSS.escape(authoredCompositionId)}-template`,
-              )
-            : null;
-        if (localTemplate) {
+        const refusal = nestedCompositionRefusal(resolvedSrc, ancestry);
+        if (refusal) {
+          failed(new Error(refusal));
+          return null;
+        }
+        const mount = async (mountParams: Parameters<typeof mountCompositionContent>[0]) => {
+          const composition = await mountCompositionContent(mountParams);
+          const runScripts = composition.runScripts;
+          composition.runScripts = async () => {
+            try {
+              await runScripts();
+            } catch (error) {
+              failed(error);
+            }
+          };
+          return composition;
+        };
+        try {
+          const localTemplate =
+            authoredCompositionId != null
+              ? document.querySelector<HTMLTemplateElement>(
+                  `template#${CSS.escape(authoredCompositionId)}-template`,
+                )
+              : null;
+          if (localTemplate) {
+            return await mount({
+              host,
+              authoredCompositionId,
+              runtimeCompositionId,
+              hostCompositionSrc: src,
+              sourceNode: localTemplate.content,
+              hasTemplate: true,
+              fallbackBodyInnerHtml: "",
+              compositionUrl,
+              injectedStyles: params.injectedStyles,
+              injectedScripts: params.injectedScripts,
+              injectedLinks: params.injectedLinks,
+              parseDimensionPx: params.parseDimensionPx,
+              onDiagnostic: params.onDiagnostic,
+            });
+          }
+          const response = await fetch(resolvedSrc);
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+          const html = await response.text();
+          const parser = new DOMParser();
+          const doc = parser.parseFromString(html, "text/html");
+          // Resolve parent-relative assets against the fetched composition before mounting.
+          rewriteSubCompositionAssetPaths(doc, compositionUrl);
+          const template =
+            (authoredCompositionId
+              ? doc.querySelector<HTMLTemplateElement>(
+                  `template#${CSS.escape(authoredCompositionId)}-template`,
+                )
+              : null) ?? doc.querySelector<HTMLTemplateElement>("template");
+          const sourceNode = template ? template.content : doc.body;
           return await mount({
             host,
             authoredCompositionId,
             runtimeCompositionId,
             hostCompositionSrc: src,
-            sourceNode: localTemplate.content,
-            hasTemplate: true,
-            fallbackBodyInnerHtml: "",
+            sourceNode,
+            hasTemplate: Boolean(template),
+            fallbackBodyInnerHtml: doc.body.innerHTML,
             compositionUrl,
             injectedStyles: params.injectedStyles,
             injectedScripts: params.injectedScripts,
             injectedLinks: params.injectedLinks,
             parseDimensionPx: params.parseDimensionPx,
+            // A non-templated composition's <head> carries critical CSS
+            // (backgrounds, positioning, fonts) and library scripts; every
+            // composition's <head> can carry a webfont <link>. The shared
+            // assembly module decides which of those apply.
+            head: doc.head,
+            // TODO(template-var-carriers): reads `<html>` only. A template/fragment
+            // sub-comp that declares on its `[data-composition-id]` root div (the
+            // dual-carrier contract from #2081) loses its defaults on this lazy
+            // external-load path — see inlineSubCompositions for the fixed path.
+            declaredVariableDefaults: readDeclaredDefaults(doc.documentElement),
+            variableDeclarer: doc.documentElement,
             onDiagnostic: params.onDiagnostic,
           });
+        } catch (error) {
+          failed(error);
+          return null;
         }
-        const response = await fetch(src);
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
-        }
-        const html = await response.text();
-        const parser = new DOMParser();
-        const doc = parser.parseFromString(html, "text/html");
-        // Resolve parent-relative assets against the fetched composition before mounting.
-        rewriteSubCompositionAssetPaths(doc, compositionUrl);
-        const template =
-          (authoredCompositionId
-            ? doc.querySelector<HTMLTemplateElement>(
-                `template#${CSS.escape(authoredCompositionId)}-template`,
-              )
-            : null) ?? doc.querySelector<HTMLTemplateElement>("template");
-        const sourceNode = template ? template.content : doc.body;
-        return await mount({
-          host,
-          authoredCompositionId,
-          runtimeCompositionId,
-          hostCompositionSrc: src,
-          sourceNode,
-          hasTemplate: Boolean(template),
-          fallbackBodyInnerHtml: doc.body.innerHTML,
-          compositionUrl,
-          injectedStyles: params.injectedStyles,
-          injectedScripts: params.injectedScripts,
-          injectedLinks: params.injectedLinks,
-          parseDimensionPx: params.parseDimensionPx,
-          // A non-templated composition's <head> carries critical CSS
-          // (backgrounds, positioning, fonts) and library scripts; every
-          // composition's <head> can carry a webfont <link>. The shared
-          // assembly module decides which of those apply.
-          head: doc.head,
-          // TODO(template-var-carriers): reads `<html>` only. A template/fragment
-          // sub-comp that declares on its `[data-composition-id]` root div (the
-          // dual-carrier contract from #2081) loses its defaults on this lazy
-          // external-load path — see inlineSubCompositions for the fixed path.
-          declaredVariableDefaults: readDeclaredDefaults(doc.documentElement),
-          variableDeclarer: doc.documentElement,
-          onDiagnostic: params.onDiagnostic,
-        });
-      } catch (error) {
-        failed(error);
-        return null;
-      }
-    }),
-  );
+      }),
+    );
+    mounted.push(...batch);
+  }
   return mounted.filter((composition): composition is MountedComposition => composition !== null);
 }
 
@@ -843,11 +866,22 @@ export async function loadCompositions(params: LoadCompositionsParams): Promise<
       applied: element.textContent ?? "",
     })),
   };
-  const external = await mountExternalCompositions(params);
-  const inline = await mountInlineTemplateCompositions(
-    params,
-    new Set(external.map(({ host }) => host)),
-  );
+  const external: MountedComposition[] = [];
+  const attemptedPaths = new Map<Element, readonly string[]>();
+  const mountedHosts = new Set<Element>();
+  async function discoverExternalCompositions(): Promise<MountedComposition[]> {
+    const discovered: MountedComposition[] = [];
+    while (true) {
+      const next = await mountExternalCompositions(params, attemptedPaths, mountedHosts);
+      discovered.push(...next);
+      for (const { host } of next) mountedHosts.add(host);
+      if (next.length === 0) return discovered;
+    }
+  }
+  external.push(...(await discoverExternalCompositions()));
+  const inline = await mountInlineTemplateCompositions(params, mountedHosts);
+  for (const { host } of inline) mountedHosts.add(host);
+  external.push(...(await discoverExternalCompositions()));
   const initial = [...external, ...inline];
   namespaceMountedSvgIds([...initial, rootScope], finalizedIds);
   await Promise.all(external.map((composition) => composition.runScripts()));
@@ -863,8 +897,14 @@ export async function loadCompositions(params: LoadCompositionsParams): Promise<
     params,
     new Set(live.map(({ host }) => host)),
   );
-  if (discovered.length) {
-    namespaceMountedSvgIds([...live, ...discovered, rootScope], finalizedIds);
+  for (const { host } of discovered) mountedHosts.add(host);
+  const discoveredExternal = await discoverExternalCompositions();
+  if (discovered.length || discoveredExternal.length) {
+    namespaceMountedSvgIds(
+      [...live, ...discovered, ...discoveredExternal, rootScope],
+      finalizedIds,
+    );
+    await Promise.all(discoveredExternal.map((composition) => composition.runScripts()));
   }
   const byHost = new Map(
     [...activeInline, ...discovered].map((composition) => [composition.host, composition]),
@@ -874,7 +914,7 @@ export async function loadCompositions(params: LoadCompositionsParams): Promise<
     if (composition) await composition.runScripts();
   }
   // Newly referenced IDs retain the initial-script repair; earlier eligible IDs stay final.
-  const finalScopes = [...live, ...discovered].filter(
+  const finalScopes = [...live, ...discovered, ...discoveredExternal].filter(
     (composition) => composition.host.isConnected,
   );
   namespaceMountedSvgIds([...finalScopes, rootScope], finalizedIds);

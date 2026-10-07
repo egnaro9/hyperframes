@@ -1,3 +1,4 @@
+import { VARIABLE_HOST_ATTR } from "../runtime/variableScope";
 import {
   compositionStyle,
   cssStyleMergeKey,
@@ -1118,6 +1119,7 @@ async function bundleProject(projectDir: string, options?: BundleOptions): Promi
     const templateHtml = templateEl.innerHTML || "";
 
     for (const host of hosts) {
+      host.setAttribute(VARIABLE_HOST_ATTR, "");
       const hostIdentity = hostIdentityByElement.get(host);
       const runtimeCompId = hostIdentity?.runtimeCompositionId || compId;
       const innerDoc = parseHTMLContent(templateHtml);

@@ -128,8 +128,8 @@ describe("applyVariableBindings", () => {
     const card = `<div data-composition-id="card"><h1 data-var-text="title">Default</h1></div>`;
     document.body.innerHTML = `
       <div data-hf-root data-composition-id="main">
-        <div id="a" data-composition-file="compositions/card.html" data-composition-id="card-a">${card}</div>
-        <div id="b" data-composition-src="compositions/card.html" data-composition-id="card-b">${card}</div>
+        <div id="a" data-hf-variable-host data-composition-file="compositions/card.html" data-composition-id="card-a">${card}</div>
+        <div id="b" data-hf-variable-host data-composition-src="compositions/card.html" data-composition-id="card-b">${card}</div>
       </div>`;
     applyVariableBindings(document);
     expect(document.querySelector("#a h1")?.textContent).toBe("Alpha");
@@ -140,7 +140,7 @@ describe("applyVariableBindings", () => {
     win.__hfVariablesByComp = { "card-1": { title: "One" } };
     document.body.innerHTML = `
       <div data-hf-root data-composition-id="main">
-        <div data-composition-id="card-1"><div data-composition-id="card-root"><h1 data-var-text="title">Default</h1></div></div>
+        <div data-hf-variable-host data-composition-id="card-1"><div data-composition-id="card-root"><h1 data-var-text="title">Default</h1></div></div>
       </div>`;
     applyVariableBindings(document);
     expect(document.querySelector("h1")?.textContent).toBe("One");
@@ -153,13 +153,36 @@ describe("applyVariableBindings", () => {
     };
     document.body.innerHTML = `
       <div data-hf-root data-composition-id="main">
-        <div data-composition-src="outer.html" data-composition-id="outer">
-          <div data-composition-id="inner"><h1 data-var-text="title">Default</h1><img data-var-src="hero" src="x.png" /></div>
+        <div data-hf-variable-host data-composition-src="outer.html" data-composition-id="outer">
+          <div data-hf-variable-host data-composition-id="inner"><h1 data-var-text="title">Default</h1><img data-var-src="hero" src="x.png" /></div>
         </div>
       </div>`;
     applyVariableBindings(document);
     expect(document.querySelector("h1")?.textContent).toBe("Inner");
     expect(document.querySelector("img")?.getAttribute("src")).toBe("inner.png");
+  });
+
+  it("keeps an empty nested host on the top-level fallback", () => {
+    win.__hfVariables = { title: "Top" };
+    win.__hfVariablesByComp = { outer: { title: "Outer" } };
+    document.body.innerHTML = `
+      <div data-composition-id="main">
+        <div data-hf-variable-host data-composition-id="outer">
+          <div data-hf-variable-host data-composition-id="inner"><p data-var-text="title">Default</p></div>
+        </div>
+      </div>`;
+    applyVariableBindings(document);
+    expect(document.querySelector("p")?.textContent).toBe("Top");
+  });
+
+  it("does not confuse an authored root id with another instance's values", () => {
+    win.__hfVariablesByComp = { host: { title: "Host" }, card: { title: "Other" } };
+    document.body.innerHTML = `
+      <div data-hf-variable-host data-composition-id="host">
+        <div data-composition-id="card"><p data-var-text="title">Default</p></div>
+      </div>`;
+    applyVariableBindings(document);
+    expect(document.querySelector("p")?.textContent).toBe("Host");
   });
 
   describe("security", () => {

@@ -207,6 +207,15 @@ export function planCompositionAssembly<TElement extends AssemblyAttributed>(
 
 export type NestedHostSkipReason = "circular composition reference" | "nesting depth exceeded";
 
+export function nestedCompositionRefusal(
+  src: string,
+  ancestry: readonly string[],
+): NestedHostSkipReason | null {
+  if (ancestry.includes(src)) return "circular composition reference";
+  if (ancestry.length >= MAX_SUB_COMPOSITION_DEPTH) return "nesting depth exceeded";
+  return null;
+}
+
 export interface NestedCompositionHost<TElement> {
   host: TElement;
   src: string;
@@ -234,12 +243,9 @@ export function enumerateNestedCompositionHosts<TElement extends AssemblyAttribu
   for (const nestedHost of assembledHost.querySelectorAll(COMPOSITION_HOST_SELECTOR)) {
     const src = nestedHost.getAttribute(COMPOSITION_SRC_ATTR);
     if (!src) continue;
-    if (ancestry.includes(src)) {
-      skipped.push({ src, reason: "circular composition reference" });
-      continue;
-    }
-    if (ancestry.length >= MAX_SUB_COMPOSITION_DEPTH) {
-      skipped.push({ src, reason: "nesting depth exceeded" });
+    const reason = nestedCompositionRefusal(src, ancestry);
+    if (reason) {
+      skipped.push({ src, reason });
       continue;
     }
     hosts.push({ host: nestedHost, src });

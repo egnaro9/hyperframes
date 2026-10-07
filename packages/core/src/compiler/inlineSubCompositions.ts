@@ -1,3 +1,4 @@
+import { VARIABLE_HOST_ATTR } from "../runtime/variableScope";
 import { SVG_REFERENCE_ALIASES_ATTR, readSvgReferenceAliases } from "./svgSelectorAliases";
 import { readExternalScriptAttributes, type ExternalScriptAttributes } from "./externalScripts";
 import { parseImportMap, type ImportMap } from "./importMaps";
@@ -644,6 +645,7 @@ export function inlineSubCompositions(
       hostEl.innerHTML = bodyHtml || contentDoc.documentElement?.outerHTML || "";
     }
 
+    hostEl.setAttribute(VARIABLE_HOST_ATTR, "");
     hostEl.setAttribute("data-composition-file", src);
     hostEl.removeAttribute("data-composition-src");
 

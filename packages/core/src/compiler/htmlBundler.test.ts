@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { mkdtempSync, writeFileSync, mkdirSync, symlinkSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync, symlinkSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseHTML } from "linkedom";
@@ -81,6 +81,24 @@ function makeSymlinkProject(
 }
 
 describe("bundleToSingleHtml", () => {
+  it.each(["file", "template"])(
+    "keeps %s mount ownership in compiled output only",
+    async (kind) => {
+      const index = `<html><body><div data-composition-id="main"><div id="host" data-composition-id="card" ${kind === "file" ? 'data-composition-src="card.html"' : ""}></div></div>${kind === "template" ? '<template id="card-template"><div data-composition-id="inner"><p>Card</p></div></template>' : ""}</body></html>`;
+      const dir = makeTempProject({
+        "index.html": index,
+        "card.html": '<html><body><div data-composition-id="inner"><p>Card</p></div></body></html>',
+      });
+      try {
+        const { document } = parseHTML(await bundleToSingleHtml(dir));
+        expect(document.getElementById("host")?.hasAttribute("data-hf-variable-host")).toBe(true);
+        expect(readFileSync(join(dir, "index.html"), "utf8")).toBe(index);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
+
   it("reports every project file it reads or looks for through onRead", async () => {
     const dir = makeTempProject({
       "index.html": `<!doctype html><html><head>
