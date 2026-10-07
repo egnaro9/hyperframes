@@ -206,8 +206,9 @@ test("CLI preflight fetches the exact plugin release with consent", () => {
     runCliPreflight({
       spawn(command, args, options) {
         calls += 1;
-        assert.equal(command, "npx");
-        assert.deepEqual(args, ["--yes", `hyperframes@${manifest.version}`, "--help"]);
+        assert.equal(command, process.platform === "win32" ? process.execPath : "npx");
+        assert.equal(args.length, process.platform === "win32" ? 4 : 3);
+        assert.deepEqual(args.slice(-3), ["--yes", `hyperframes@${manifest.version}`, "--help"]);
         assert.equal(options.env.HYPERFRAMES_PLUGIN_VERSION, manifest.version);
         assert.equal(options.shell, undefined);
         return { status: 0, stdout: "  check Validate project", stderr: "" };
