@@ -185,17 +185,18 @@ function getFirstClassToken(node: Element): string | null {
 
 function filenameFromAssetUrl(url: string | null): string | null {
   if (!url) return null;
+  let filename: string | undefined;
   try {
     const parsed = new URL(url, document.baseURI);
-    const filename = parsed.pathname.split("/").filter(Boolean).at(-1);
-    if (!filename) return null;
-    try {
-      return decodeURIComponent(filename);
-    } catch {
-      return filename;
-    }
+    filename = parsed.pathname.split("/").filter(Boolean).at(-1);
   } catch {
-    return url.split(/[\\/]/).filter(Boolean).at(-1) ?? null;
+    filename = url.split(/[?#]/)[0].split(/[\\/]/).filter(Boolean).at(-1);
+  }
+  if (!filename) return null;
+  try {
+    return decodeURIComponent(filename);
+  } catch {
+    return filename;
   }
 }
 
