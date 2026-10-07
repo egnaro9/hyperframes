@@ -519,9 +519,9 @@
     "./schemas/registry-item.json": "./schemas/registry-item.json",
     "./timeline-asset-id": {
       "bun": "./src/timelineAssetId.ts",
+      "node": "./dist/timelineAssetId.js",
       "import": "./src/timelineAssetId.ts",
-      "types": "./src/timelineAssetId.ts",
-      "node": "./dist/timelineAssetId.js"
+      "types": "./src/timelineAssetId.ts"
     }
   },
   "publishConfig": {

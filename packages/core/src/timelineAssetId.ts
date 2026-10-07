@@ -1,11 +1,18 @@
+function trimIdUnderscores(value: string): string {
+  let start = 0;
+  let end = value.length;
+  while (value[start] === "_") start += 1;
+  while (end > start && value[end - 1] === "_") end -= 1;
+  return value.slice(start, end);
+}
+
 export function buildTimelineAssetId(assetPath: string, existingIds: Iterable<string>): string {
-  const baseName = assetPath.split("/").pop() ?? "asset";
+  const baseName = assetPath.slice(assetPath.lastIndexOf("/") + 1);
   const normalized = baseName
     .replace(/\.[^.]+$/, "")
     .replace(/[^a-zA-Z0-9_-]+/g, "_")
-    .replace(/^_+|_+$/g, "")
     .toLowerCase();
-  const baseId = normalized || "asset";
+  const baseId = trimIdUnderscores(normalized) || "asset";
   const ids = new Set(existingIds);
   if (!ids.has(baseId)) return baseId;
   let suffix = 2;
@@ -13,15 +20,18 @@ export function buildTimelineAssetId(assetPath: string, existingIds: Iterable<st
   return `${baseId}_${suffix}`;
 }
 
+function referenceChildren(element: Element): Iterable<Element> {
+  if (element.children.length > 0) return element.children;
+  if (element.tagName.toLowerCase() !== "template") return [];
+  const content = (element as HTMLTemplateElement).content;
+  return content ? content.children : [];
+}
+
 function documentElements(document: Document): Element[] {
   const elements: Element[] = [];
   const visit = (element: Element): void => {
     elements.push(element);
-    for (const child of Array.from(element.children)) visit(child);
-    if (element.tagName.toLowerCase() === "template" && element.children.length === 0) {
-      const content = (element as HTMLTemplateElement).content;
-      if (content) for (const child of Array.from(content.children)) visit(child);
-    }
+    for (const child of referenceChildren(element)) visit(child);
   };
   if (document.documentElement) visit(document.documentElement);
   return elements;
@@ -43,47 +53,59 @@ function referencesId(value: string, id: string): boolean {
   return decoded.includes(id);
 }
 
+function decodeFragment(value: string): string {
+  const fragment = value.split("#").slice(1).join("#");
+  try {
+    return decodeURIComponent(fragment);
+  } catch {
+    return fragment;
+  }
+}
+
+function attributeReferencesId(attribute: Attr, id: string): boolean {
+  if (["id", "data-hf-id"].includes(attribute.name)) return false;
+  if (attribute.name === "src") return referencesId(decodeFragment(attribute.value), id);
+  return referencesId(attribute.value, id);
+}
+
+function elementReferencesId(element: Element, id: string): boolean {
+  const code = ["script", "style"].includes(element.tagName.toLowerCase());
+  if (code && referencesId(element.textContent ?? "", id)) return true;
+  return Array.from(element.attributes).some((attribute) => attributeReferencesId(attribute, id));
+}
+
+type MediaIdentity = { id: string; src: string };
+
+function readMediaIdentity(element: Element): MediaIdentity | null {
+  const media = ["video", "audio", "img"].includes(element.tagName.toLowerCase());
+  const src = element.getAttribute("src");
+  const id = element.getAttribute("id");
+  if (!media || !src || !id) return null;
+  return { id, src };
+}
+
+function matchesGeneratedId({ id, src }: MediaIdentity): boolean {
+  const base = buildTimelineAssetId(src, []);
+  const suffix = id.slice(base.length);
+  return id === base || (id.startsWith(base) && /^_(?:[2-9]\d*|1\d+)$/.test(suffix));
+}
+
+function canRenameMedia(element: Element, identity: MediaIdentity, newSrc: string): boolean {
+  const authored = ["data-timeline-label", "data-label", "aria-label"].some((name) =>
+    element.getAttribute(name)?.trim(),
+  );
+  return !authored && identity.src !== newSrc && matchesGeneratedId(identity);
+}
+
 export function replacementTimelineAssetId(
   document: Document,
   element: Element,
   newSrc: string,
 ): string | null {
-  if (!["video", "audio", "img"].includes(element.tagName.toLowerCase())) return null;
-  const oldSrc = element.getAttribute("src");
-  const id = element.getAttribute("id");
-  if (!oldSrc || !id || oldSrc === newSrc) return null;
-  if (
-    ["data-timeline-label", "data-label", "aria-label"].some((name) =>
-      element.getAttribute(name)?.trim(),
-    )
-  )
-    return null;
-  const base = buildTimelineAssetId(oldSrc, []);
-  const suffix = id.slice(base.length);
-  if (id !== base && (!id.startsWith(base) || !/^_[2-9]\d*$|^_1\d+$/.test(suffix))) return null;
+  const identity = readMediaIdentity(element);
+  if (!identity || !canRenameMedia(element, identity, newSrc)) return null;
   const elements = documentElements(document);
-  for (const other of elements) {
-    if (
-      ["script", "style"].includes(other.tagName.toLowerCase()) &&
-      referencesId(other.textContent ?? "", id)
-    )
-      return null;
-    for (const attribute of Array.from(other.attributes)) {
-      if (attribute.name === "id" || attribute.name === "data-hf-id") continue;
-      if (attribute.name === "src") {
-        const fragment = attribute.value.split("#").slice(1).join("#");
-        let decodedFragment = fragment;
-        try {
-          decodedFragment = decodeURIComponent(fragment);
-        } catch {
-          decodedFragment = fragment;
-        }
-        if (referencesId(decodedFragment, id)) return null;
-        continue;
-      }
-      if (referencesId(attribute.value, id)) return null;
-    }
-  }
+  if (elements.some((other) => elementReferencesId(other, identity.id))) return null;
   const ids = elements
     .filter((other) => other !== element)
     .map((other) => other.getAttribute("id"))
