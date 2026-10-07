@@ -93,6 +93,24 @@ describe.runIf(executablePath)("layout audit in Chromium", () => {
   });
   it.each([
     {
+      name: "inherited Greek uppercase with dialytika",
+      parentLang: "el",
+      ownLang: null,
+      transform: "uppercase",
+      text: "ήί",
+      gap: 80,
+      overlap: true,
+    },
+    {
+      name: "inherited Lithuanian lowercase with dot",
+      parentLang: "lt",
+      ownLang: null,
+      transform: "lowercase",
+      text: "Ì",
+      gap: 76,
+      overlap: true,
+    },
+    {
       name: "inherited Turkish uppercase",
       parentLang: "tr",
       ownLang: null,
