@@ -1,6 +1,6 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { transcribe, type TranscribeProgress } from "./transcribe.js";
 import { readWav } from "./wav.js";
@@ -366,4 +366,23 @@ it("--language auto with an English-only model detects with the multilingual one
   });
   expect(result).toMatchObject({ model: "small", detectedLanguage: "es" });
   expect(languagePassed()).toEqual(["es"]);
+});
+
+it("keeps detection WAVs in a private temporary directory and removes it after a failed vote", async () => {
+  musicThenSpanish();
+  const directories = new Map<string, number>();
+  const previous = native.exec.getMockImplementation()!;
+  native.exec.mockImplementation((command: string, args: string[]) => {
+    if (!args.includes("--detect-language")) return previous(command, args);
+    const directory = dirname(args.at(-1)!);
+    directories.set(directory, statSync(directory).mode & 0o777);
+    throw new Error("detection failed");
+  });
+  await transcribe(join(dir, "audio.wav"), dir, { model: "small" });
+  expect(directories.size).toBe(1);
+  for (const [directory, permissions] of directories) {
+    expect(directory).not.toBe(tmpdir());
+    if (process.platform !== "win32") expect(permissions).toBe(0o700);
+    expect(existsSync(directory)).toBe(false);
+  }
 });

@@ -3,7 +3,15 @@ import { execFile, execFileSync } from "node:child_process";
 import { once } from "node:events";
 import { createInterface } from "node:readline";
 import type { Readable } from "node:stream";
-import { existsSync, readFileSync, mkdirSync, rmSync, statSync, unlinkSync } from "node:fs";
+import {
+  existsSync,
+  readFileSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  statSync,
+  unlinkSync,
+} from "node:fs";
 import { join, extname } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
@@ -643,7 +651,8 @@ async function languageFromWindows(
   const starts = clip.seconds === null ? [] : detectionWindows(clip.seconds, clip.onset);
   if (starts.length === 0) return null;
   clip.onProgress?.("Detecting the language...");
-  const window = tempWavPath();
+  const windowDir = mkdtempSync(join(tmpdir(), "hyperframes-language-"));
+  const window = join(windowDir, "window.wav");
   const votes: LanguageVote[] = [];
   try {
     for (const start of starts) {
@@ -671,7 +680,7 @@ async function languageFromWindows(
       }
     }
   } finally {
-    rmSync(window, { force: true });
+    rmSync(windowDir, { recursive: true, force: true });
   }
   return pickLanguage(votes);
 }

@@ -323,18 +323,17 @@ async function transcribeAudio(
   const { createRenderCancellationScope, stoppedByCancelSignal } =
     await import("../utils/renderCancellation.js");
 
-  // Only the engine pick reads auto as no language: the whisper model choice still needs "auto" (it drops .en).
-  const spoken = requestedLanguage(opts.language);
+  const routingLanguage = requestedLanguage(opts.language);
   const engine = (opts.engine ?? "auto").toLowerCase();
   if (engine !== "auto" && engine !== "parakeet" && engine !== "whisper") {
     failWith(`Unknown --engine: ${opts.engine}. Use auto, parakeet, or whisper.`, !!opts.json);
   }
   const unsupported = sherpaUnsupportedReason();
   const sherpaUsable = () => !unsupported && sherpaParakeetInstalled();
-  let runner = pickRunner(engine, sherpaUsable, spoken);
+  let runner = pickRunner(engine, sherpaUsable, routingLanguage);
   if (engine === "parakeet" && runner === "whisper") {
     failWith(
-      !parakeetSpeaks(spoken)
+      !parakeetSpeaks(routingLanguage)
         ? `Parakeet does not transcribe --language ${opts.language}; it covers ${PARAKEET_LANGUAGES.split(" ").join(", ")}. Use --engine whisper.`
         : (unsupported ??
             `Parakeet is not installed. Install it with: ${PARAKEET_INSTALL_COMMAND} (or use --engine whisper)`),
@@ -398,7 +397,7 @@ async function transcribeAudio(
       const reason = normalizeErrorMessage(err).replace(/\.+$/, "");
       const parakeetError = `Parakeet failed: ${reason}. To repair it, run: ${PARAKEET_INSTALL_COMMAND}`;
       if (!parakeetFallsBack(engine)) throw new Error(parakeetError);
-      runner = pickRunner(engine, () => false, spoken);
+      runner = pickRunner(engine, () => false, routingLanguage);
       spin?.clear();
       console.error(c.warn(`${parakeetError}. Using ${runner} for this run.`));
       spin?.start(`Transcribing with ${label(runner)}...`);
@@ -484,7 +483,7 @@ async function transcribeAudio(
     if (isWhisperUnavailable(err)) {
       trackTranscribeUnavailable({ optional: opts.optional === true });
       const install =
-        engine === "auto" && parakeetSpeaks(spoken) && !unsupported
+        engine === "auto" && parakeetSpeaks(routingLanguage) && !unsupported
           ? PARAKEET_INSTALL_COMMAND
           : undefined;
       if (opts.json) {
