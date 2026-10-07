@@ -67,6 +67,14 @@ export async function compileHtml(
     }
   }
 
+  return clampProbedMedia(html, projectDir, probeMediaDuration);
+}
+
+async function clampProbedMedia(
+  html: string,
+  projectDir: string,
+  probeMediaDuration: MediaDurationProber,
+): Promise<string> {
   // Phase 2: Bound authored audio to playable source. Explicit video slots may
   // outlive their source and render by holding the final frame.
   const preResolved = extractResolvedMedia(html);

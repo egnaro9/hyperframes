@@ -68,3 +68,9 @@ export function splitUrlSuffix(urlValue: string): { basePath: string; suffix: st
 export function decodedUrlPath(url: string): string {
   return decodeWellFormedEscapes(splitUrlSuffix(url).basePath);
 }
+
+export function encodeUrlPath(path: string): string {
+  return encodeURIComponent(path)
+    .replace(/%2F/g, "/")
+    .replace(/['()]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
+}

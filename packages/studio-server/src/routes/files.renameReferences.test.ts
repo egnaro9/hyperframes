@@ -19,6 +19,61 @@ function fileRoutesFor(project: string): Hono {
 }
 
 describe("rename references", () => {
+  it("does not treat an attribute-looking string inside a raw HTML value as a URL field", () => {
+    const text = `<div data-note="src='old%20file.png'"></div>`;
+    expect(rewrite(text, "old file.png", "new file.png", false)).toBe(text);
+  });
+
+  it("decodes the enclosing HTML grammar when matching a CSS URL in a style attribute", () => {
+    const text = '<div style="background:url(&quot;assets/a&#39;b.png&quot;)"></div>';
+    expect(rewrite(text, "assets/a'b.png", "assets/c(d).png", false)).toBe(
+      '<div style="background:url(&quot;assets/c%28d%29.png&quot;)"></div>',
+    );
+  });
+
+  it("does not interpret percent or entity spelling in raw script file values", () => {
+    const text = '{"path":"old%20file.png","raw":"old file.png"}';
+    expect(
+      referenceRewriter("old file.png", "new file.png", false, ["old%20file.png"])(text, "script"),
+    ).toBe('{"path":"old%20file.png","raw":"new file.png"}');
+    expect(referenceRewriter("a&b.png", "new.png", false)('"a&amp;b.png"', "script")).toBe(
+      '"a&amp;b.png"',
+    );
+  });
+
+  it("keeps a raw percent-spelled composition sibling distinct from a space", () => {
+    const text = '<div data-composition-src="scenes/old%20file.html"></div>';
+    expect(referenceRewriter("scenes/old file.html", "scenes/new file.html", false)(text)).toBe(
+      text,
+    );
+  });
+
+  it("can rename an entity-quoted composition path containing literal percent text twice", () => {
+    const first = rewrite(
+      '<div data-composition-src="scenes/a.html"></div>',
+      "scenes/a.html",
+      'scenes/a"%20.html',
+      false,
+    );
+    expect(first).toBe('<div data-composition-src="scenes/a&quot;%20.html"></div>');
+    expect(rewrite(first, 'scenes/a"%20.html', "scenes/new file.html", false)).toBe(
+      '<div data-composition-src="scenes/new file.html"></div>',
+    );
+  });
+
+  it("escapes parentheses in an unquoted CSS URL", () => {
+    expect(
+      referenceRewriter("assets/a.png", "assets/a(b).png", false)("url(assets/a.png)", "css"),
+    ).toBe("url(assets/a%28b%29.png)");
+  });
+
+  it("does not backtrack through overlapping whitespace in an unfinished CSS URL", () => {
+    const text = "url(assets/a.png)\nurl(" + " ".repeat(10000);
+    expect(referenceRewriter("assets/a.png", "assets/b.png", false)(text, "css")).toBe(
+      "url(assets/b.png)\nurl(" + " ".repeat(10000),
+    );
+  });
+
   it("keeps the whole unquoted reference valid when renaming a folder with spaces", () => {
     expect(rewrite("<img src=assets/a.png>", "assets", "my assets", true)).toBe(
       "<img src=my&#32;assets/a.png>",
@@ -43,8 +98,8 @@ describe("rename references", () => {
 
   it("keeps URL delimiters and literal percent signs escaped in an entity-spelled reference", () => {
     expect(
-      rewrite('<img src="assets/a&amp;b.png">', "assets/a&b.png", "assets/c?%20#.png", false),
-    ).toBe('<img src="assets/c%3F%2520%23.png">');
+      rewrite('<img src="assets/a&amp;b.png">', "assets/a&b.png", "assets/c(?%20#).png", false),
+    ).toBe('<img src="assets/c(%3F%2520%23).png">');
   });
 
   it("leaves encoded longer existing names alone on either side of a match", () => {
@@ -235,6 +290,22 @@ describe("renaming a folder over the route", () => {
   const dirs: string[] = [];
   afterEach(() => dirs.splice(0).forEach((dir) => rmSync(dir, { recursive: true, force: true })));
 
+  it.each([42, null, "assets/\ud800.png", "assets/\udc00.png"])(
+    "rejects an unrepresentable rename path %j before moving the file",
+    async (newPath) => {
+      const project = mkdtempSync(join(tmpdir(), "hf-invalid-rename-"));
+      dirs.push(project);
+      mkdirSync(join(project, "assets"));
+      writeFileSync(join(project, "assets", "a.png"), "original asset");
+      const response = await fileRoutesFor(project).request("/projects/p/files/assets/a.png", {
+        method: "PATCH",
+        body: JSON.stringify({ newPath }),
+      });
+      expect(response.status).toBe(400);
+      expect(readFileSync(join(project, "assets", "a.png"), "utf8")).toBe("original asset");
+    },
+  );
+
   it("rewrites references under it and leaves a sibling folder's, and prose, alone", async () => {
     const project = mkdtempSync(join(tmpdir(), "hf-rename-refs-"));
     dirs.push(project);
@@ -311,23 +382,23 @@ describe("renaming a folder over the route", () => {
     );
     const response = await fileRoutesFor(project).request("/projects/p/files/assets/a.png", {
       method: "PATCH",
-      body: JSON.stringify({ newPath: "assets/c?%20#.png" }),
+      body: JSON.stringify({ newPath: "assets/c(?%20#).png" }),
     });
     expect(response.status).toBe(200);
     expect(JSON.parse(readFileSync(join(project, "config.json"), "utf8")).path).toBe(
-      "assets/c?%20#.png",
+      "assets/c(?%20#).png",
     );
     const html = readFileSync(join(project, "index.html"), "utf8");
-    expect(html).toContain('src="assets/c%3F%2520%23.png"');
-    expect(html).toContain('href="assets/c%3F%2520%23.png"');
-    expect(html).toContain("url(assets/c%3F%2520%23.png)");
+    expect(html).toContain('src="assets/c(%3F%2520%23).png"');
+    expect(html).toContain('href="assets/c(%3F%2520%23).png"');
+    expect(html).toContain("url(assets/c%28%3F%2520%23%29.png)");
     const { bundleToSingleHtml } = await import("@hyperframes/core/compiler");
     const bundled = await bundleToSingleHtml(project);
     expect(bundled).toContain("data:image/png;base64,aW1hZ2Ugd2l0bmVzcw==");
-    expect(bundled).not.toContain("url(assets/c%3F%2520%23.png)");
+    expect(bundled).not.toContain("url(assets/c%28%3F%2520%23%29.png)");
   });
 
-  it.each(["my intro.html", 'my "intro".html', "my ?%20#intro.html"])(
+  it.each(["my intro.html", 'my "intro".html', "my ?%20#intro.html", "my 🙂 intro.html"])(
     "keeps a renamed sub-composition %s reachable by the bundler",
     async (newName) => {
       const project = mkdtempSync(join(tmpdir(), "hf-rename-composition-"));

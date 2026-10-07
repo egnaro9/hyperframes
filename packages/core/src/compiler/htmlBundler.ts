@@ -27,6 +27,7 @@ import { readFileSync, existsSync, statSync } from "fs";
 import { resolve, relative, dirname, isAbsolute, sep } from "path";
 import {
   decodeWellFormedEscapes,
+  encodeUrlPath,
   decodedUrlPath,
   splitUrlSuffix,
 } from "@hyperframes/parsers/asset-paths";
@@ -146,8 +147,8 @@ function rebaseCssUrls(css: string, cssFileDir: string, projectDir: string): str
     if (!urlValue || !isRelativeUrl(urlValue)) return full;
     const { basePath, suffix } = splitUrlSuffix(urlValue.trim());
     if (!basePath) return full;
-    const absolutePath = resolve(resolvedDir, basePath);
-    const rebased = relative(resolvedRoot, absolutePath).split(sep).join("/");
+    const absolutePath = resolve(resolvedDir, decodeWellFormedEscapes(basePath));
+    const rebased = encodeUrlPath(relative(resolvedRoot, absolutePath).split(sep).join("/"));
     if (rebased === basePath) return full;
     return `url(${quote || ""}${rebased}${suffix}${quote || ""})`;
   });
@@ -156,8 +157,8 @@ function rebaseCssUrls(css: string, cssFileDir: string, projectDir: string): str
 function rebaseRelativePath(urlValue: string, fromDir: string, toDir: string): string {
   const { basePath, suffix } = splitUrlSuffix(urlValue.trim());
   if (!basePath) return urlValue;
-  const absolutePath = resolve(fromDir, basePath);
-  const rebased = relative(resolve(toDir), absolutePath).split(sep).join("/");
+  const absolutePath = resolve(fromDir, decodeWellFormedEscapes(basePath));
+  const rebased = encodeUrlPath(relative(resolve(toDir), absolutePath).split(sep).join("/"));
   return appendSuffixToUrl(rebased, suffix);
 }
 
@@ -1042,7 +1043,7 @@ async function bundleProject(projectDir: string, options?: BundleOptions): Promi
     // re-pointed at its own directory when its content moves to the root
     // document; project-root refs with no such sibling stay as authored.
     assetExists: (path: string) => {
-      const resolved = resolveEntryUrl(path);
+      const resolved = resolveEntryPath(path);
       if (resolved) noteRead(resolved);
       return resolved !== null && existsSync(resolved);
     },

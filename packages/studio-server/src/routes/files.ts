@@ -3,6 +3,7 @@
 // parallel — two writers, same switch-case interface. Structural duplication
 // is load-bearing (both paths must remain testable in isolation).
 import type { Hono } from "hono";
+import { encodeUrlPath } from "@hyperframes/parsers/asset-paths";
 import { bodyLimit } from "hono/body-limit";
 import {
   closeSync,
@@ -713,17 +714,13 @@ const ENTITY_CHARACTERS = new Map(
 );
 const ENTITY_REFERENCE_PATTERN = new RegExp([...ENTITY_CHARACTERS.keys()].join("|"));
 
-function encodeFileReference(path: string): string {
-  return encodeURIComponent(path).replace(/%2F/g, "/").replace(/'/g, "%27");
-}
-
 function referenceSpellings(char: string): string {
   const spellings = [escapeRegExp(char)];
-  const encoded = encodeFileReference(char);
+  const encoded = encodeUrlPath(char);
   if (encoded !== char)
     spellings.push(encoded.replace(/[A-F]/g, (hex) => `[${hex}${hex.toLowerCase()}]`));
   if (ENTITY_SPELLINGS[char]) spellings.push(...ENTITY_SPELLINGS[char]);
-  const scriptSpelling = JSON.stringify(char).slice(1, -1);
+  const scriptSpelling = escapeQuotedReference(char, '"');
   if (scriptSpelling !== char) spellings.push(escapeRegExp(scriptSpelling));
   if (["'", "`", "$", " ", "(", ")"].includes(char)) spellings.push(escapeRegExp(`\\${char}`));
   if (/[\t\n\f\r =<>`]/.test(char)) spellings.push(`&#${char.codePointAt(0)!};`);
@@ -754,13 +751,13 @@ function spellLike(
   quote: string,
   url: boolean,
 ): string {
-  if (reference !== oldPath && /%[0-9A-Fa-f]{2}/.test(reference)) return encodeFileReference(path);
-  if (reference !== oldPath && ENTITY_REFERENCE_PATTERN.test(reference)) {
-    return escapeHtmlReference(url ? path.replace(/[?%#]/g, encodeFileReference) : path);
+  if (url && reference !== oldPath && /%[0-9A-Fa-f]{2}/.test(reference)) return encodeUrlPath(path);
+  if (syntax === "html" && reference !== oldPath && ENTITY_REFERENCE_PATTERN.test(reference)) {
+    return escapeHtmlReference(url ? path.replace(/[?%#]/g, encodeUrlPath) : path);
   }
   switch (syntax) {
     case "html": {
-      const escaped = escapeHtmlReference(url ? path.replace(/[?%#]/g, encodeFileReference) : path);
+      const escaped = escapeHtmlReference(url ? path.replace(/[?%#]/g, encodeUrlPath) : path);
       return ["'", '"'].includes(quote)
         ? escaped
         : escaped.replace(/[\t\n\f\r =<>`]/g, (char) => `&#${char.codePointAt(0)!};`);
@@ -771,7 +768,7 @@ function spellLike(
       return quote === "`" ? escaped.replace(/\$\{/g, "\\${") : escaped;
     }
     case "css":
-      return url ? encodeFileReference(path) : path;
+      return url ? encodeUrlPath(path) : path;
     case "plain":
       return path;
   }
@@ -844,18 +841,30 @@ export function referenceRewriter(
       window = Math.max(window, path.length * 9);
     }
   }
-  const normalized = (text: string, syntax: ReferenceSyntax) =>
-    decodeWellFormedEscapes(
-      decodeQuotedReference(text, syntax).replace(
+  const normalized = (
+    text: string,
+    syntax: ReferenceSyntax,
+    url: boolean,
+    htmlAttribute = false,
+  ) => {
+    let value = decodeQuotedReference(text, syntax);
+    if (syntax === "html" || htmlAttribute) {
+      value = value.replace(
         new RegExp(`${ENTITY_REFERENCE_PATTERN.source}|&#([0-9]{1,7});`, "g"),
         (entity, code: string | undefined) => {
           if (code === undefined) return ENTITY_CHARACTERS.get(entity)!;
           const value = Number(code);
           return value <= 0x10ffff ? String.fromCodePoint(value) : entity;
         },
-      ),
-    ).replace(/\\{0,2}[\\/]/g, "/");
+      );
+    }
+    if (url) value = decodeWellFormedEscapes(value);
+    return value.replace(/\\{0,2}[\\/]/g, "/");
+  };
   return (text, syntax = "html") => {
+    pattern.lastIndex = 0;
+    if (!pattern.test(text)) return text;
+    pattern.lastIndex = 0;
     const inlineRegions =
       syntax === "html"
         ? [...text.matchAll(/<(script|style)\b[^>]*>([\s\S]*?)<\/\1\s*>/gi)].map((match) => ({
@@ -864,34 +873,50 @@ export function referenceRewriter(
             syntax: match[1]!.toLowerCase() === "style" ? ("css" as const) : ("script" as const),
           }))
         : [];
-    const urlRegions = [
-      ...(syntax === "html"
-        ? [
-            ...text.matchAll(/[\t\n\f\r ](?:src|href|poster)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi),
-          ].map((match) => ({
-            start: match.index!,
-            end: match.index! + match[0].length,
-            syntax: "html" as const,
-          }))
-        : []),
-      ...(syntax === "html" || syntax === "css"
-        ? [
-            ...text.matchAll(
-              /\burl\(\s*(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|(?:\\.|[^)\\])*)\s*\)/gi,
+    const attributes =
+      syntax === "html"
+        ? [...text.matchAll(/<[A-Za-z][\w:-]*(?:[^"'<>]|"[^"]*"|'[^']*')*>/g)].flatMap((tag) =>
+            [...tag[0].matchAll(/([^\s"'=<>`/]+)\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/g)].map(
+              (attr) => ({
+                name: attr[1]!.toLowerCase(),
+                start: tag.index! + attr.index!,
+                end: tag.index! + attr.index! + attr[0].length,
+              }),
             ),
-          ].map((match) => ({
-            start: match.index!,
-            end: match.index! + match[0].length,
-            syntax: "css" as const,
-          }))
-        : []),
-      ...(syntax === "html" || syntax === "css"
-        ? [...text.matchAll(/@import\s+(?:"[^"]*"|'[^']*')/gi)].map((match) => ({
-            start: match.index!,
-            end: match.index! + match[0].length,
-            syntax: "css" as const,
-          }))
-        : []),
+          )
+        : [];
+    const cssContexts =
+      syntax === "css"
+        ? [{ start: 0, end: text.length, htmlAttribute: false }]
+        : [
+            ...inlineRegions
+              .filter((region) => region.syntax === "css")
+              .map((region) => ({ ...region, htmlAttribute: false })),
+            ...attributes
+              .filter((attr) => attr.name === "style")
+              .map((attr) => ({ ...attr, htmlAttribute: true })),
+          ];
+    const cssFields = (pattern: RegExp) =>
+      cssContexts.flatMap((context) =>
+        [...text.slice(context.start, context.end).matchAll(pattern)].map((match) => ({
+          start: context.start + match.index!,
+          end: context.start + match.index! + match[0].length,
+          syntax: "css" as const,
+          htmlAttribute: context.htmlAttribute,
+        })),
+      );
+    const urlRegions = [
+      ...attributes
+        .filter((attr) => ["src", "href", "poster"].includes(attr.name))
+        .map((attr) => ({
+          ...attr,
+          syntax: "html" as const,
+          htmlAttribute: true,
+        })),
+      ...cssFields(
+        /\burl\((?:\s*"(?:\\.|[^"\\])*"\s*|\s*'(?:\\.|[^'\\])*'\s*|(?:\\.|[^)\\])*)\)/gi,
+      ),
+      ...cssFields(/@import\s+(?:"[^"]*"|'[^']*')/gi),
     ].sort((a, b) => a.start - b.start);
     let urlIndex = 0;
     let regionIndex = 0;
@@ -901,11 +926,25 @@ export function referenceRewriter(
       while (inlineRegions[regionIndex] && inlineRegions[regionIndex]!.end <= offset) regionIndex++;
       const region = inlineRegions[regionIndex];
       const matchSyntax = region && offset >= region.start ? region.syntax : syntax;
+      while (urlRegions[urlIndex] && urlRegions[urlIndex]!.end <= offset) urlIndex++;
+      const urlRegion = urlRegions[urlIndex];
+      const url = matchSyntax !== "script" && !!urlRegion && offset >= urlRegion.start;
+      const fieldSyntax = url ? urlRegion!.syntax : matchSyntax;
+      const reference = match.slice(lead.length);
+      if (normalized(reference, fieldSyntax, url, urlRegion?.htmlAttribute) !== oldPath)
+        return match;
       const at = offset + lead.length;
-      const head = normalized(text.slice(Math.max(0, at - window), at), matchSyntax);
+      const head = normalized(
+        text.slice(Math.max(0, at - window), at),
+        fieldSyntax,
+        url,
+        urlRegion?.htmlAttribute,
+      );
       const tail = normalized(
         text.slice(offset + match.length, offset + match.length + window),
-        matchSyntax,
+        fieldSyntax,
+        url,
+        urlRegion?.htmlAttribute,
       );
       const inLonger = [...afterLengths].some((after) => {
         const befores = tail.length >= after && around.get(tail.slice(0, after));
@@ -917,11 +956,8 @@ export function referenceRewriter(
         );
       });
       if (inLonger) return match;
-      while (urlRegions[urlIndex] && urlRegions[urlIndex]!.end <= offset) urlIndex++;
-      const urlRegion = urlRegions[urlIndex];
-      const url = matchSyntax !== "script" && !!urlRegion && offset >= urlRegion.start;
       const quote = text[offset - 1] ?? "";
-      return `${lead}${spellLike(match.slice(lead.length), newPath, oldPath, url ? urlRegion!.syntax : matchSyntax, quote, url)}`;
+      return `${lead}${spellLike(reference, newPath, oldPath, fieldSyntax, quote, url)}`;
     });
   };
 }
@@ -3575,12 +3611,14 @@ export function registerFileRoutes(api: Hono, adapter: StudioApiAdapter): void {
     const res = await resolveProjectFile(c, adapter, { mustExist: true });
     if ("error" in res) return res.error;
 
-    const body = (await c.req.json()) as { newPath?: string };
-    if (!body.newPath || body.newPath.includes("\0")) {
+    const body: unknown = await c.req.json();
+    const newPath =
+      body !== null && typeof body === "object" && "newPath" in body ? body.newPath : undefined;
+    if (typeof newPath !== "string" || !newPath || /[\0\uD800-\uDFFF]/u.test(newPath)) {
       return c.json({ error: "newPath required" }, 400);
     }
 
-    const newAbs = resolveWithinProject(res.project.dir, body.newPath);
+    const newAbs = resolveWithinProject(res.project.dir, newPath);
     if (!newAbs) {
       return c.json({ error: "forbidden" }, 403);
     }
@@ -3593,9 +3631,9 @@ export function registerFileRoutes(api: Hono, adapter: StudioApiAdapter): void {
     renameSync(res.absPath, newAbs);
 
     // Update references to the old path across all project files
-    const updatedFiles = updateReferences(res.project.dir, res.filePath, body.newPath, isDirectory);
+    const updatedFiles = updateReferences(res.project.dir, res.filePath, newPath, isDirectory);
 
-    return c.json({ ok: true, path: body.newPath, updatedReferences: updatedFiles });
+    return c.json({ ok: true, path: newPath, updatedReferences: updatedFiles });
   });
 
   // ── Duplicate ──

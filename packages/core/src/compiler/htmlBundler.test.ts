@@ -81,6 +81,25 @@ function makeSymlinkProject(
 }
 
 describe("bundleToSingleHtml", () => {
+  it("re-encodes physical directories when rebasing stylesheet and composition asset URLs", async () => {
+    const dir = makeTempProject({
+      "index.html":
+        '<html><head><link rel="stylesheet" href="css%2520%3F%23/style.css"></head><body><main data-composition-id="root" data-width="320" data-height="180"><div data-composition-id="scene" data-composition-src="scenes%20?#/scene.html" data-start="0" data-duration="1"></div></main></body></html>',
+      "css%20?#/style.css": ".image {background:url(icon.png)}",
+      "css%20?#/icon.png": "stylesheet directory witness",
+      "scenes%20?#/scene.html":
+        '<template><div data-composition-id="scene" data-width="320" data-height="180"><img src="icon%28a%29.png"></div></template>',
+      "scenes%20?#/icon(a).png": "composition directory witness",
+    });
+    try {
+      const bundled = await bundleToSingleHtml(dir);
+      expect(bundled).toContain(inlinedAs("image/png", "stylesheet directory witness"));
+      expect(bundled).toContain(inlinedAs("image/png", "composition directory witness"));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("resolves encoded URL filenames once across asset, stylesheet and script consumers", async () => {
     const dir = makeTempProject({
       "index.html":
