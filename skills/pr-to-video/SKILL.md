@@ -37,8 +37,10 @@ else
   PROJECT_DIR="$(node <SKILL_DIR>/scripts/project-dir.mjs --pr "$PR")"
 fi
 echo "PR-to-video project: $PROJECT_DIR"
-node <SKILL_DIR>/scripts/preflight.mjs
+node "<PLUGIN_ROOT>/skills/pr-to-video/scripts/preflight.mjs"
 ```
+
+For plugin installs, the capability preflight above uses the manifest-pinned launcher, which fetches a missing package with `--yes`. For standalone installs, run `npx -y hyperframes@<exact-version> --help` using the exact release you installed and confirm it lists `check`.
 
 The capability preflight runs before fetch, story work, audio, or frame dispatch. If the installed CLI cannot run the validation command required by this skill, stop with its upgrade instruction rather than spending the run's context first.
 

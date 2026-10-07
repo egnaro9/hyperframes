@@ -3,6 +3,7 @@
 import { spawnSync } from "node:child_process";
 import { realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
+import { invocation } from "../../hyperframes/scripts/plugin-cli.mjs";
 
 export function hasCliCommand(helpText, command) {
   const escaped = command.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -10,9 +11,11 @@ export function hasCliCommand(helpText, command) {
 }
 
 export function runCliPreflight({ command = "check", spawn = spawnSync } = {}) {
-  const result = spawn("npx", ["hyperframes", "--help"], {
+  const cli = invocation(["--help"]);
+  const result = spawn(cli.command, cli.args, {
     encoding: "utf8",
-    shell: process.platform === "win32",
+    env: cli.env,
+    windowsHide: true,
   });
   const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
   if (result.status !== 0) {

@@ -38,9 +38,11 @@ Inspectable intermediate files in the work directory:
 
 ## CLI Resolution
 
+For plugin installs, use the launcher below. It fetches the exact manifest release with `--yes` when the package is missing from the cache. For standalone installs, probe the exact release you installed with `npx -y hyperframes@<exact-version> --help`.
+
 ```bash
 # hyperframes — transcription (local Whisper) + rendering the assembled HTML to MP4
-npx hyperframes --help
+node "<PLUGIN_ROOT>/skills/hyperframes/scripts/plugin-cli.mjs" --help
 ```
 
 This skill runs entirely on the **hyperframes** CLI plus system `ffmpeg` / `ffprobe`.

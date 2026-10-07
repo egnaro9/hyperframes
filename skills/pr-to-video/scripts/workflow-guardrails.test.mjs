@@ -6,7 +6,7 @@ import test from "node:test";
 
 import { parsePrReference, resolvePrToVideoProjectDir } from "./project-dir.mjs";
 import { buildFramePackets } from "./frame-packets.mjs";
-import { hasCliCommand } from "./preflight.mjs";
+import { hasCliCommand, runCliPreflight } from "./preflight.mjs";
 
 function write(path, contents) {
   mkdirSync(dirname(path), { recursive: true });
@@ -195,4 +195,25 @@ test("CLI capability detection rejects skills newer than the available command s
 
   assert.equal(hasCliCommand(stableHelp, "check"), false);
   assert.equal(hasCliCommand(currentHelp, "check"), true);
+});
+
+test("CLI preflight fetches the exact plugin release with consent", () => {
+  const manifest = JSON.parse(
+    readFileSync(new URL("../../../.claude-plugin/plugin.json", import.meta.url), "utf8"),
+  );
+  let calls = 0;
+  assert.equal(
+    runCliPreflight({
+      spawn(command, args, options) {
+        calls += 1;
+        assert.equal(command, "npx");
+        assert.deepEqual(args, ["--yes", `hyperframes@${manifest.version}`, "--help"]);
+        assert.equal(options.env.HYPERFRAMES_PLUGIN_VERSION, manifest.version);
+        assert.equal(options.shell, undefined);
+        return { status: 0, stdout: "  check Validate project", stderr: "" };
+      },
+    }),
+    true,
+  );
+  assert.equal(calls, 1);
 });
