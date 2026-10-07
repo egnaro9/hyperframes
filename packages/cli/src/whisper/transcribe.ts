@@ -540,6 +540,7 @@ export async function transcribe(
     overrideMs: options?.timeoutMs,
   });
   let through = 0;
+  let streamedUntil = 0;
   const heard = (words: Word[], at: number) => {
     if (!onEvent || (words.length === 0 && at <= through)) return;
     through = Math.max(through, at);
@@ -553,7 +554,10 @@ export async function transcribe(
         onEvent &&
         ((line) => {
           const segment = segmentWords(line);
-          if (segment) heard(segment.words, segment.end);
+          // With word timing on, whisper.cpp reprints its first window's segments out of order.
+          if (!segment || segment.start < streamedUntil) return;
+          streamedUntil = segment.end;
+          heard(segment.words, segment.end);
         }),
       onStderr:
         onEvent && wavSeconds
@@ -636,7 +640,7 @@ const toSeconds = (h: string, m: string, s: string) =>
 const toMs = (seconds: number) => Math.round(seconds * 1000) / 1000;
 
 /** A segment line whisper-cli prints as it decodes; word times are spread by length until the JSON's. */
-function segmentWords(line: string): { words: Word[]; end: number } | null {
+function segmentWords(line: string): { words: Word[]; start: number; end: number } | null {
   const m = SEGMENT_LINE.exec(line);
   if (!m) return null;
   const start = toSeconds(m[1]!, m[2]!, m[3]!);
@@ -651,7 +655,7 @@ function segmentWords(line: string): { words: Word[]; end: number } | null {
     at += ((end - start) * text.length) / letters;
     return { text, start: toMs(from), end: toMs(at) };
   });
-  return { words, end };
+  return { words, start, end };
 }
 
 /** Resolves once whisper exits and both its streams are read, so no printed line is lost. */

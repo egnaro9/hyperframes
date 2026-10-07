@@ -211,6 +211,16 @@ it("streams the words of each segment whisper prints, before the final transcrip
   expect(result).toMatchObject({ wordCount: 1, durationSeconds: 1 });
 });
 
+it("never streams a segment that starts before what was already streamed", async () => {
+  // whisper.cpp 1.9.4 with word timing on reprints first-window segments like this.
+  native.printed.stdout =
+    "[00:00:20.980 --> 00:00:23.000]   later\n" +
+    "[00:00:18.540 --> 00:00:20.980]   earlier\n" +
+    "[00:00:20.980 --> 00:00:23.000]   later\n";
+  const { words } = await transcribeStreaming();
+  expect(words.map((event) => event.words.map((word) => word.text))).toEqual([["later"]]);
+});
+
 it("reports progress through audio where whisper prints no segment, once per step", async () => {
   writeFileSync(join(dir, "audio.wav"), Buffer.alloc(4 * 32_000));
   native.printed.stderr =
