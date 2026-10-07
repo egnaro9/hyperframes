@@ -9,7 +9,39 @@ import type { StudioApiAdapter } from "../types";
 const rewrite = (text: string, from: string, to: string, folder: boolean) =>
   referenceRewriter(from, to, folder)(text);
 
+function fileRoutesFor(project: string): Hono {
+  const adapter = {
+    resolveProject: async (id: string) => ({ id, dir: project }),
+  } as unknown as StudioApiAdapter;
+  const app = new Hono();
+  registerFileRoutes(app, adapter);
+  return app;
+}
+
 describe("rename references", () => {
+  it("keeps URL delimiters and quotes encoded when renaming a percent-spelled reference", () => {
+    expect(
+      rewrite("<img src='assets/my%20clip.png'>", "assets/my clip.png", "assets/it's?#.png", false),
+    ).toBe("<img src='assets/it%27s%3F%23.png'>");
+  });
+
+  it("can rename an apostrophe reference after it was percent-encoded", () => {
+    expect(
+      rewrite('<img src="assets/it%27s.png">', "assets/it's.png", "assets/their.png", false),
+    ).toBe('<img src="assets/their.png">');
+  });
+
+  it("keeps both quote kinds escaped when renaming an entity-spelled reference", () => {
+    expect(
+      rewrite(
+        "<img src='assets/it&apos;s.png'>",
+        "assets/it's.png",
+        `assets/that's & "ours".png`,
+        false,
+      ),
+    ).toBe("<img src='assets/that&#39;s &amp; &quot;ours&quot;.png'>");
+  });
+
   it("rewrites a folder where files under it are named, in every form a project writes them", () => {
     const text = [
       '<img src="assets/a.png">',
@@ -167,11 +199,7 @@ describe("renaming a folder over the route", () => {
     const html =
       '<img src="assets/a.png"><img src="assets-backup/a.png"><img src="other assets/a.png"><a href="empty assets/">x</a><p>The assets folder</p>';
     writeFileSync(join(project, "index.html"), html);
-    const adapter = {
-      resolveProject: async (id: string) => ({ id, dir: project }),
-    } as unknown as StudioApiAdapter;
-    const app = new Hono();
-    registerFileRoutes(app, adapter);
+    const app = fileRoutesFor(project);
 
     const response = await app.request("/projects/p/files/assets", {
       method: "PATCH",
@@ -183,6 +211,33 @@ describe("renaming a folder over the route", () => {
       '<img src="brand/a.png"><img src="assets-backup/a.png"><img src="other assets/a.png"><a href="empty assets/">x</a><p>The assets folder</p>',
     );
   });
+
+  it.each([
+    ["my clip.mp4", "next clip.mp4", "my%20clip.mp4", "next%20clip.mp4"],
+    ["a&b.png", "c&d.png", "a&amp;b.png", "c&amp;d.png"],
+  ])(
+    "renames %s references using their authored spelling",
+    async (oldName, newName, before, after) => {
+      const project = mkdtempSync(join(tmpdir(), "hf-rename-spelling-"));
+      dirs.push(project);
+      mkdirSync(join(project, "assets"));
+      writeFileSync(join(project, "assets", oldName), "x");
+      writeFileSync(join(project, "index.html"), `<img src="assets/${before}">`);
+      const app = fileRoutesFor(project);
+
+      const response = await app.request(
+        `/projects/p/files/assets/${encodeURIComponent(oldName)}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({ newPath: `assets/${newName}` }),
+        },
+      );
+
+      expect(response.status).toBe(200);
+      expect(readFileSync(join(project, "index.html"), "utf8")).toBe(`<img src="assets/${after}">`);
+      expect(readFileSync(join(project, "assets", newName), "utf8")).toBe("x");
+    },
+  );
 
   it("leaves a path reached through a linked folder alone", async () => {
     const project = mkdtempSync(join(tmpdir(), "hf-rename-link-"));
@@ -196,11 +251,7 @@ describe("renaming a folder over the route", () => {
       join(project, "index.html"),
       '<img src="assets/a.png"><img src="other assets/a.png">',
     );
-    const adapter = {
-      resolveProject: async (id: string) => ({ id, dir: project }),
-    } as unknown as StudioApiAdapter;
-    const app = new Hono();
-    registerFileRoutes(app, adapter);
+    const app = fileRoutesFor(project);
 
     await app.request("/projects/p/files/assets/a.png", {
       method: "PATCH",
@@ -220,11 +271,7 @@ describe("renaming a folder over the route", () => {
     writeFileSync(join(project, "shared", "logo.png"), "x");
     symlinkSync("../shared/logo.png", join(project, "assets", "logo.png"), "file");
     writeFileSync(join(project, "index.html"), '<img src="assets/logo.png">');
-    const adapter = {
-      resolveProject: async (id: string) => ({ id, dir: project }),
-    } as unknown as StudioApiAdapter;
-    const app = new Hono();
-    registerFileRoutes(app, adapter);
+    const app = fileRoutesFor(project);
 
     const response = await app.request("/projects/p/files/assets/logo.png", {
       method: "PATCH",

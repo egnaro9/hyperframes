@@ -701,21 +701,31 @@ const SEPARATOR = String.raw`\\{0,2}[\\/]`;
 const REFERENCE_START = String.raw`(?<![\w./\\+-])`;
 const FILE_END = String.raw`(?![\w-]|\.\w)`;
 
-const ENTITY_SPELLINGS: Record<string, string> = { "&": "&amp;", "'": "&#39;|&apos;", '"': "&quot;" };
+const ENTITY_SPELLINGS: Record<string, readonly string[]> = {
+  "&": ["&amp;"],
+  "'": ["&#39;", "&apos;"],
+  '"': ["&quot;"],
+};
+const ENTITY_REFERENCE_PATTERN = new RegExp(Object.values(ENTITY_SPELLINGS).flat().join("|"));
 
-// A character as a reference can spell it: as itself, percent-encoded (either hex case) or as an entity.
+function encodeFileReference(path: string): string {
+  return encodeURIComponent(path).replace(/%2F/g, "/").replace(/'/g, "%27");
+}
+
 function referenceSpellings(char: string): string {
   const spellings = [escapeRegExp(char)];
-  const encoded = encodeURIComponent(char);
-  if (encoded !== char) spellings.push(encoded.replace(/[A-F]/g, (hex) => `[${hex}${hex.toLowerCase()}]`));
-  if (ENTITY_SPELLINGS[char]) spellings.push(ENTITY_SPELLINGS[char]);
+  const encoded = encodeFileReference(char);
+  if (encoded !== char)
+    spellings.push(encoded.replace(/[A-F]/g, (hex) => `[${hex}${hex.toLowerCase()}]`));
+  if (ENTITY_SPELLINGS[char]) spellings.push(...ENTITY_SPELLINGS[char]);
   return spellings.length === 1 ? spellings[0]! : `(?:${spellings.join("|")})`;
 }
 
-// The new path in the spelling the old reference used, so `my%20clip.mp4` stays a valid URL.
 function spellLike(reference: string, path: string): string {
-  const encoded = /%[0-9A-Fa-f]{2}/.test(reference) ? encodeURI(path) : path;
-  return /&(?:amp|#39|apos|quot);/.test(reference) ? encoded.replace(/&/g, "&amp;") : encoded;
+  const encoded = /%[0-9A-Fa-f]{2}/.test(reference) ? encodeFileReference(path) : path;
+  return ENTITY_REFERENCE_PATTERN.test(reference)
+    ? encoded.replace(/[&"']/g, (char) => ENTITY_SPELLINGS[char]![0]!)
+    : encoded;
 }
 
 function referencePattern(oldPath: string, isDirectory: boolean): RegExp {

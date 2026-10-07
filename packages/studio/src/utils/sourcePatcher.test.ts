@@ -3,6 +3,7 @@ import {
   applyPatch,
   applyPatchByTarget,
   readAttributeByTarget,
+  readTagAttribute,
   readTagSnippetByTarget,
   type PatchOperation,
 } from "./sourcePatcher";
@@ -684,4 +685,68 @@ describe("file names with special characters", () => {
       "it's here",
     );
   });
+});
+
+describe("readTagAttribute", () => {
+  it("reads both quote kinds and decodes entities without losing the other quote", () => {
+    expect(readTagAttribute(`<video src="assets/it's&amp;ours.mp4">`, "src")).toBe(
+      "assets/it's&ours.mp4",
+    );
+    expect(readTagAttribute(`<video src='assets/say "hi".mp4'>`, "src")).toBe(
+      'assets/say "hi".mp4',
+    );
+  });
+
+  it("distinguishes an empty attribute from a missing attribute", () => {
+    expect(readTagAttribute('<video src="">', "src")).toBe("");
+    expect(readTagAttribute("<video>", "src")).toBeUndefined();
+  });
+});
+
+describe("whole attribute names", () => {
+  it.each(["data-src", "x-src", "xml:src", "srcset"])(
+    "reads and edits src without matching %s",
+    (other) => {
+      const tag = `<img id="a" ${other}="assets/other.png" src="assets/original.png">`;
+      expect(readTagAttribute(tag, "src")).toBe("assets/original.png");
+      for (const patch of [
+        (op: PatchOperation) => applyPatch(tag, "a", op),
+        (op: PatchOperation) => applyPatchByTarget(tag, { id: "a" }, op),
+      ]) {
+        expect(patch({ type: "html-attribute", property: "src", value: "assets/new.png" })).toBe(
+          `<img id="a" ${other}="assets/other.png" src="assets/new.png">`,
+        );
+        expect(patch({ type: "html-attribute", property: "src", value: null })).toBe(
+          `<img id="a" ${other}="assets/other.png">`,
+        );
+      }
+      expect(readTagAttribute(`<img ${other}="assets/other.png">`, "src")).toBeUndefined();
+    },
+  );
+
+  it("does not treat a longer data attribute as a boolean attribute to remove", () => {
+    const tag = '<div id="a" data-title-long="keep">';
+    expect(
+      applyPatchByTarget(tag, { id: "a" }, { type: "attribute", property: "title", value: null }),
+    ).toBe(tag);
+  });
+});
+
+it("removes a boolean attribute without truncating a longer attribute name", () => {
+  const tag = '<video id="a" muted-long="keep" muted>';
+  expect(
+    applyPatchByTarget(
+      tag,
+      { id: "a" },
+      { type: "html-attribute", property: "muted", value: null },
+    ),
+  ).toBe('<video id="a" muted-long="keep">');
+});
+
+it("decodes an authored apostrophe entity once", () => {
+  expect(readTagAttribute("<video src='assets/it&apos;s.mp4'>", "src")).toBe("assets/it's.mp4");
+  expect(readTagAttribute("<video src='assets/it&#39;s.mp4'>", "src")).toBe("assets/it's.mp4");
+  expect(readTagAttribute('<video src="assets/it&amp;apos;s.mp4">', "src")).toBe(
+    "assets/it&apos;s.mp4",
+  );
 });
