@@ -1,20 +1,23 @@
 // @vitest-environment happy-dom
 
-import { act, useRef } from "react";
+import { act, useLayoutEffect, useRef } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { liveTime, usePlayerStore, type ZoomMode } from "../store/playerStore";
 import { useTimelinePlayhead } from "./useTimelinePlayhead";
+import { useTimelineScrollViewport } from "./useTimelineScrollViewport";
+import { useTimelineClipRenderWindow } from "./useTimelineClipRenderWindow";
+import { requestTimelineZoom, settleTimelineZoom } from "./timelineZoomInput";
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
 const ORIGIN = 32;
 
-function scrollBox(scrollLeft: number) {
+function scrollBox(scrollLeft: number, clientWidth = 800) {
   const el = document.createElement("div");
   let left = scrollLeft;
   Object.defineProperties(el, {
-    clientWidth: { value: 800 },
+    clientWidth: { value: clientWidth },
     scrollWidth: { value: 20_000 },
     scrollLeft: { get: () => left, set: (v: number) => (left = v) },
   });
@@ -27,9 +30,16 @@ interface HarnessProps {
   scroll: HTMLDivElement;
   dragging?: boolean;
   zoomMode?: ZoomMode;
+  syncScrollViewport?: (scroll: HTMLDivElement) => void;
 }
 
-function Harness({ pps: fixedPps, scroll, dragging = false, zoomMode = "manual" }: HarnessProps) {
+function Harness({
+  pps: fixedPps,
+  scroll,
+  dragging = false,
+  zoomMode = "manual",
+  syncScrollViewport = () => {},
+}: HarnessProps) {
   const storePps = usePlayerStore((s) => s.timelinePps);
   const pps = fixedPps ?? storePps;
   const scrollRef = useRef(scroll);
@@ -37,6 +47,7 @@ function Harness({ pps: fixedPps, scroll, dragging = false, zoomMode = "manual" 
   useTimelinePlayhead({
     playheadRef: { current: document.createElement("div") },
     scrollRef,
+    syncScrollViewport,
     ppsRef: { current: pps },
     durationRef,
     isDragging: { current: dragging },
@@ -235,6 +246,63 @@ describe("useTimelinePlayhead follow while paused", () => {
     mount({ pps: 100, scroll, zoomMode: "fit" });
     act(() => liveTime.notifySeek(30));
     expect(scroll.scrollLeft).toBe(0);
+  });
+});
+
+describe("useTimelinePlayhead committed viewport", () => {
+  it("keeps the visible 59-second clip mounted when a pointer zoom commits", () => {
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        observe() {}
+        disconnect() {}
+      },
+    );
+    usePlayerStore.setState({
+      zoomMode: "manual",
+      manualZoomPercent: 1000,
+      timelineFitPps: 10,
+      timelinePps: 100,
+    });
+    const scroll = scrollBox(5000, 1080);
+    const container = document.createElement("div");
+    function Probe() {
+      const pps = usePlayerStore((s) => s.timelinePps);
+      const { viewport, setScrollRef, syncScrollViewport } = useTimelineScrollViewport(
+        useRef(scroll),
+        [],
+      );
+      useLayoutEffect(() => setScrollRef(scroll), [setScrollRef]);
+      const { renderTimeRange } = useTimelineClipRenderWindow({
+        tracks: [],
+        viewport,
+        pixelsPerSecond: pps,
+        contentOrigin: ORIGIN,
+        duration: 100,
+      });
+      return (
+        <>
+          <Harness scroll={scroll} syncScrollViewport={syncScrollViewport} />
+          {renderTimeRange.start <= 59 && renderTimeRange.end >= 59 && <span data-clip="59" />}
+          <output>{viewport.scrollLeft}</output>
+        </>
+      );
+    }
+    const root = createRoot(container);
+    roots.push(root);
+    try {
+      act(() => root.render(<Probe />));
+      expect(container.querySelector('[data-clip="59"]')).not.toBeNull();
+      act(() => {
+        requestTimelineZoom(1090, { time: 55.24, x: 556 });
+        settleTimelineZoom();
+      });
+      expect(scroll.scrollLeft).toBeCloseTo(5497.16);
+      expect(container.querySelector('[data-clip="59"]')).not.toBeNull();
+      expect(Number(container.querySelector("output")?.textContent)).toBeCloseTo(5497.16);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 
