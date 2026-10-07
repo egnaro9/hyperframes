@@ -11,6 +11,7 @@ import { execSync } from "child_process";
 import { existsSync, readdirSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
+import { resolveChromeProxyArgs } from "./chromeProxy.js";
 import { chromeMajorCeiling, exceedsChromeCeiling } from "./chromeHostCeiling.js";
 import { DEFAULT_CONFIG, type EngineConfig } from "../config.js";
 import { getSystemTotalMb, LOW_MEMORY_TOTAL_MB_THRESHOLD } from "./systemMemory.js";
@@ -505,11 +506,14 @@ function formatProbeFailure(err: unknown): string {
   return `probe failed (${err instanceof Error ? err.message : String(err)})`;
 }
 
-async function probeAutoBrowserGpuMode(options: {
-  chromePath?: string;
-  browserTimeout?: number;
-  platform?: NodeJS.Platform;
-}): Promise<GpuProbeOutcome> {
+async function probeAutoBrowserGpuMode(
+  options: {
+    chromePath?: string;
+    browserTimeout?: number;
+    platform?: NodeJS.Platform;
+  },
+  proxyArgs: string[],
+): Promise<GpuProbeOutcome> {
   const platform = options.platform ?? process.platform;
   const browserTimeout = options.browserTimeout ?? DEFAULT_CONFIG.browserTimeout;
   const executablePath = options.chromePath ?? resolveHeadlessShellPath({});
@@ -522,7 +526,7 @@ async function probeAutoBrowserGpuMode(options: {
 
   try {
     const info = await probeHardwareWebGlInfo(ppt, {
-      args: getHardwareGpuProbeArgs(platform),
+      args: [...getHardwareGpuProbeArgs(platform), ...proxyArgs],
       browserTimeout,
       executablePath,
     });
@@ -561,7 +565,7 @@ async function probeAutoBrowserGpuMode(options: {
  * safe failure mode; misclassifying toward hardware would error on the real
  * render.
  */
-export function resolveBrowserGpuMode(
+export async function resolveBrowserGpuMode(
   mode: EngineConfig["browserGpuMode"],
   options: {
     chromePath?: string;
@@ -571,7 +575,8 @@ export function resolveBrowserGpuMode(
 ): Promise<"software" | "hardware"> {
   if (mode === "software") return Promise.resolve(mode);
 
-  _autoBrowserGpuModeCache ??= probeAutoBrowserGpuMode(options);
+  const proxyArgs = resolveChromeProxyArgs(process.env);
+  _autoBrowserGpuModeCache ??= probeAutoBrowserGpuMode(options, proxyArgs);
   if (mode === "auto") return _autoBrowserGpuModeCache.then((probed) => probed.mode);
 
   return _autoBrowserGpuModeCache.then((probed) => {
@@ -676,7 +681,7 @@ function createBrowserLaunchFingerprint(
       ? "beginframe"
       : "screenshot";
   return {
-    args: chromeArgs,
+    args: [...chromeArgs, ...resolveChromeProxyArgs(process.env)],
     executablePath: headlessShell,
     browserTimeoutMs: launchConfig.browserTimeout,
     protocolTimeoutMs: launchConfig.protocolTimeout,
