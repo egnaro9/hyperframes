@@ -187,7 +187,13 @@ function filenameFromAssetUrl(url: string | null): string | null {
   if (!url) return null;
   try {
     const parsed = new URL(url, document.baseURI);
-    return parsed.pathname.split("/").filter(Boolean).at(-1) ?? null;
+    const filename = parsed.pathname.split("/").filter(Boolean).at(-1);
+    if (!filename) return null;
+    try {
+      return decodeURIComponent(filename);
+    } catch {
+      return filename;
+    }
   } catch {
     return url.split(/[\\/]/).filter(Boolean).at(-1) ?? null;
   }

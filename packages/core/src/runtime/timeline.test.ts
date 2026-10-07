@@ -640,14 +640,28 @@ describe("collectRuntimeTimelinePayload", () => {
     expect(result.clips[0].assetUrl).toBe("https://example.com/hero.jpg");
   });
 
-  it("updates a generated media label after replacing its source", () => {
-    document.body.innerHTML = `<div data-composition-id="main" data-duration="10">
-      <video id="harbor" class="clip harbor" src="assets/harbor.mp4"
-        data-start="0" data-duration="5"></video>
+  it.each(["video", "audio", "img"])(
+    "updates a generated %s label after replacing its source",
+    (tag) => {
+      document.body.innerHTML = `<div data-composition-id="main" data-duration="10">
+      <${tag} id="harbor" class="clip harbor" src="assets/harbor.mp4"
+        data-start="0" data-duration="5"></${tag}>
     </div>`;
-    expect(collectRuntimeTimelinePayload(defaultParams).clips[0].label).toBe("Harbor");
-    document.getElementById("harbor")!.setAttribute("src", "assets/library.mp4");
-    expect(collectRuntimeTimelinePayload(defaultParams).clips[0].label).toBe("Library");
+      expect(collectRuntimeTimelinePayload(defaultParams).clips[0].label).toBe("Harbor");
+      document.getElementById("harbor")!.setAttribute("src", "assets/library.mp4");
+      expect(collectRuntimeTimelinePayload(defaultParams).clips[0].label).toBe("Library");
+    },
+  );
+
+  it.each([
+    ["Harbor%20Sunset.mp4", "Harbor Sunset"],
+    ["%E6%B5%B7%E6%B8%AF.mp4", "海港"],
+    ["Harbor%.mp4", "Harbor%"],
+  ])("decodes the generated label from %s", (filename, label) => {
+    document.body.innerHTML = `<div data-composition-id="main" data-duration="10">
+      <video id="old-name" src="assets/${filename}" data-start="0" data-duration="5"></video>
+    </div>`;
+    expect(collectRuntimeTimelinePayload(defaultParams).clips[0].label).toBe(label);
   });
 
   it.each(["data-timeline-label", "data-label", "aria-label"])(
