@@ -205,6 +205,18 @@ describe("serveStaticProjectHtml asset roots", () => {
     expect(await res.text()).toBe("PROJECT");
   });
 
+  it("serves a file whose name has a bare percent sign", async () => {
+    const projectDir = mk();
+    writeFileSync(join(projectDir, "100%.png"), "PERCENT");
+    writeFileSync(join(projectDir, "50% off.png"), "SALE");
+    server = await serveStaticProjectHtml(projectDir, "<html></html>", undefined, []);
+
+    const bare = await fetch(`${server.url}100%.png`);
+    expect(bare.status).toBe(200);
+    expect(await bare.text()).toBe("PERCENT");
+    expect(await (await fetch(`${server.url}50%%20off.png`)).text()).toBe("SALE");
+  });
+
   it("404s a path present in no root", async () => {
     const projectDir = mk();
     server = await serveStaticProjectHtml(projectDir, "<html></html>", undefined, [mk()]);

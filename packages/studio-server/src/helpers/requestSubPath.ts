@@ -8,7 +8,7 @@ export function requestSubPath(url: string, route: string): string {
 }
 
 // A browser sends src="100%.png" as-is, so a % without two hex digits after it is the file's own.
-function decodeWellFormedEscapes(path: string): string {
+export function decodeWellFormedEscapes(path: string): string {
   return path.replace(/(?:%[0-9A-Fa-f]{2})+/g, (run) => {
     try {
       return decodeURIComponent(run);
