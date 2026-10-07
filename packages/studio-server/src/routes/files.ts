@@ -701,8 +701,28 @@ const SEPARATOR = String.raw`\\{0,2}[\\/]`;
 const REFERENCE_START = String.raw`(?<![\w./\\+-])`;
 const FILE_END = String.raw`(?![\w-]|\.\w)`;
 
+const ENTITY_SPELLINGS: Record<string, string> = { "&": "&amp;", "'": "&#39;|&apos;", '"': "&quot;" };
+
+// A character as a reference can spell it: as itself, percent-encoded (either hex case) or as an entity.
+function referenceSpellings(char: string): string {
+  const spellings = [escapeRegExp(char)];
+  const encoded = encodeURIComponent(char);
+  if (encoded !== char) spellings.push(encoded.replace(/[A-F]/g, (hex) => `[${hex}${hex.toLowerCase()}]`));
+  if (ENTITY_SPELLINGS[char]) spellings.push(ENTITY_SPELLINGS[char]);
+  return spellings.length === 1 ? spellings[0]! : `(?:${spellings.join("|")})`;
+}
+
+// The new path in the spelling the old reference used, so `my%20clip.mp4` stays a valid URL.
+function spellLike(reference: string, path: string): string {
+  const encoded = /%[0-9A-Fa-f]{2}/.test(reference) ? encodeURI(path) : path;
+  return /&(?:amp|#39|apos|quot);/.test(reference) ? encoded.replace(/&/g, "&amp;") : encoded;
+}
+
 function referencePattern(oldPath: string, isDirectory: boolean): RegExp {
-  const name = oldPath.split("/").map(escapeRegExp).join(SEPARATOR);
+  const name = oldPath
+    .split("/")
+    .map((segment) => Array.from(segment, referenceSpellings).join(""))
+    .join(SEPARATOR);
   const end = isDirectory ? `(?=${SEPARATOR})` : FILE_END;
   return new RegExp(
     String.raw`${REFERENCE_START}(?<lead>(?:\.{1,2}${SEPARATOR}|${SEPARATOR}){0,4})${name}${end}`,
@@ -751,7 +771,7 @@ export function referenceRewriter(
           )
         );
       });
-      return inLonger ? match : `${lead}${newPath}`;
+      return inLonger ? match : `${lead}${spellLike(match.slice(lead.length), newPath)}`;
     });
 }
 

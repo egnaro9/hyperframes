@@ -3,8 +3,7 @@
  * Handles inline style updates, attribute changes, and text content.
  */
 
-// An attribute value in either quote kind; the other kind may appear inside it (it's.png).
-const QUOTED_VALUE = `(?:"[^"]*"|'[^']*')`;
+const VALUE_IN_EITHER_QUOTE = `(?:"[^"]*"|'[^']*')`;
 
 export function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -305,8 +304,11 @@ export function readAttributeByTarget(
   const match = findTagByTarget(html, target);
   if (!match) return undefined;
 
-  const fullAttr = attr.startsWith("data-") ? attr : `data-${attr}`;
-  const valueMatch = new RegExp(`\\b${fullAttr}=(?:"([^"]*)"|'([^']*)')`).exec(match.tag);
+  return readTagAttribute(match.tag, attr.startsWith("data-") ? attr : `data-${attr}`);
+}
+
+export function readTagAttribute(tag: string, attr: string): string | undefined {
+  const valueMatch = new RegExp(`\\b${escapeRegex(attr)}=(?:"([^"]*)"|'([^']*)')`).exec(tag);
   const value = valueMatch?.[1] ?? valueMatch?.[2];
   return value != null ? unescapeHtmlAttribute(value) : undefined;
 }
@@ -326,14 +328,14 @@ function patchAttributeByTarget(
   if (!match) return html;
 
   const fullAttr = attr.startsWith("data-") ? attr : `data-${attr}`;
-  const attrPattern = new RegExp(`\\b${escapeRegex(fullAttr)}=${QUOTED_VALUE}`);
+  const attrPattern = new RegExp(`\\b${escapeRegex(fullAttr)}=${VALUE_IN_EITHER_QUOTE}`);
   const tag = match.tag;
 
   if (value === null) {
     // Remove the attribute if present
-    const boolAttrPattern = new RegExp(`\\b${escapeRegex(fullAttr)}(?:=${QUOTED_VALUE})?`);
+    const boolAttrPattern = new RegExp(`\\b${escapeRegex(fullAttr)}(?:=${VALUE_IN_EITHER_QUOTE})?`);
     if (!boolAttrPattern.test(tag)) return html;
-    const removePattern = new RegExp(`\\s+${escapeRegex(fullAttr)}(?:=${QUOTED_VALUE})?`);
+    const removePattern = new RegExp(`\\s+${escapeRegex(fullAttr)}(?:=${VALUE_IN_EITHER_QUOTE})?`);
     const newTag = tag.replace(removePattern, "");
     return replaceTagAtMatch(html, match, newTag);
   }
@@ -363,12 +365,12 @@ function patchAttribute(
 
   const tag = match[1];
   const fullAttr = attr.startsWith("data-") ? attr : `data-${attr}`;
-  const attrPattern = new RegExp(`\\b${escapeRegex(fullAttr)}=${QUOTED_VALUE}`);
+  const attrPattern = new RegExp(`\\b${escapeRegex(fullAttr)}=${VALUE_IN_EITHER_QUOTE}`);
 
   if (value === null) {
-    const boolAttrPattern = new RegExp(`\\b${escapeRegex(fullAttr)}(?:=${QUOTED_VALUE})?`);
+    const boolAttrPattern = new RegExp(`\\b${escapeRegex(fullAttr)}(?:=${VALUE_IN_EITHER_QUOTE})?`);
     if (!boolAttrPattern.test(tag)) return html;
-    const removePattern = new RegExp(`\\s+${escapeRegex(fullAttr)}(?:=${QUOTED_VALUE})?`);
+    const removePattern = new RegExp(`\\s+${escapeRegex(fullAttr)}(?:=${VALUE_IN_EITHER_QUOTE})?`);
     const newTag = tag.replace(removePattern, "");
     return html.replace(tag, () => newTag);
   }
@@ -458,7 +460,7 @@ function patchHtmlAttributeInTag(
 
     if (value === null || value === "" || value === "false") {
       if (!hasBoolAttr) return html;
-      const removePattern = new RegExp(`\\s+${escapedAttr}(?:=${QUOTED_VALUE})?`);
+      const removePattern = new RegExp(`\\s+${escapedAttr}(?:=${VALUE_IN_EITHER_QUOTE})?`);
       const newTag = tag.replace(removePattern, "");
       return html.replace(tag, () => newTag);
     }
@@ -467,10 +469,10 @@ function patchHtmlAttributeInTag(
     return html.replace(tag, () => newTag);
   }
 
-  const attrPattern = new RegExp(`\\b${escapeRegex(attr)}=${QUOTED_VALUE}`);
+  const attrPattern = new RegExp(`\\b${escapeRegex(attr)}=${VALUE_IN_EITHER_QUOTE}`);
   if (value === null) {
     if (!attrPattern.test(tag)) return html;
-    const removePattern = new RegExp(`\\s+${escapeRegex(attr)}=${QUOTED_VALUE}`);
+    const removePattern = new RegExp(`\\s+${escapeRegex(attr)}=${VALUE_IN_EITHER_QUOTE}`);
     const newTag = tag.replace(removePattern, "");
     return html.replace(tag, () => newTag);
   }
