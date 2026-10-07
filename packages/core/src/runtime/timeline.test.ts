@@ -640,6 +640,29 @@ describe("collectRuntimeTimelinePayload", () => {
     expect(result.clips[0].assetUrl).toBe("https://example.com/hero.jpg");
   });
 
+  it("updates a generated media label after replacing its source", () => {
+    document.body.innerHTML = `<div data-composition-id="main" data-duration="10">
+      <video id="harbor" class="clip harbor" src="assets/harbor.mp4"
+        data-start="0" data-duration="5"></video>
+    </div>`;
+    expect(collectRuntimeTimelinePayload(defaultParams).clips[0].label).toBe("Harbor");
+    document.getElementById("harbor")!.setAttribute("src", "assets/library.mp4");
+    expect(collectRuntimeTimelinePayload(defaultParams).clips[0].label).toBe("Library");
+  });
+
+  it.each(["data-timeline-label", "data-label", "aria-label"])(
+    "preserves an authored %s after replacing a media source",
+    (attribute) => {
+      document.body.innerHTML = `<div data-composition-id="main" data-duration="10">
+        <video id="harbor" src="assets/harbor.mp4" data-start="0" data-duration="5"></video>
+      </div>`;
+      const clip = document.getElementById("harbor")!;
+      clip.setAttribute(attribute, "Opening Shot");
+      clip.setAttribute("src", "assets/library.mp4");
+      expect(collectRuntimeTimelinePayload(defaultParams).clips[0].label).toBe("Opening Shot");
+    },
+  );
+
   it("uses label from data-timeline-label", () => {
     const root = document.createElement("div");
     root.setAttribute("data-composition-id", "main");
