@@ -28,6 +28,18 @@ export function heygenBase() {
   return `${host}/v3`;
 }
 
+// No base override, or one on HeyGen's own hosts (a canary or dev API).
+function heygenOwnBase() {
+  const host = process.env.HEYGEN_API_BASE?.trim();
+  if (!host) return true;
+  try {
+    const name = new URL(host).hostname;
+    return name === "heygen.com" || name.endsWith(".heygen.com");
+  } catch {
+    return false;
+  }
+}
+
 // A host gateway: the host named its own API base and the key that base accepts. It pays for every call, so it wins
 // over any other credential the environment carries.
 const hostGatewayKey = () =>
@@ -93,6 +105,8 @@ export function heygenCredential() {
 function resolveCredential() {
   const gatewayKey = hostGatewayKey();
   if (gatewayKey) return { headers: { "X-Api-Key": gatewayKey } };
+  // Every other credential belongs to HeyGen: a base on any other host gets none of them.
+  if (!heygenOwnBase()) return null;
   const accessToken = process.env.HEYGEN_ACCESS_TOKEN;
   if (accessToken) return { headers: { Authorization: `Bearer ${accessToken}` } };
   const envKey = process.env.HEYGEN_API_KEY || process.env.HYPERFRAMES_API_KEY;

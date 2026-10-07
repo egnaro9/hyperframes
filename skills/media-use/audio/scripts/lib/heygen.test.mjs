@@ -250,3 +250,22 @@ test("heygenJSON sends its request to the host's HEYGEN_API_BASE with the host's
     server.close();
   }
 });
+
+test("a base that isn't HeyGen's gets no stored or host OAuth credential, only a key named for it", () => {
+  withCleanHeygenEnv(() => {
+    const dir = mkdtempSync(join(tmpdir(), "heygen-cred-"));
+    try {
+      process.env.HEYGEN_CONFIG_DIR = dir;
+      writeFileSync(join(dir, "credentials"), JSON.stringify({ api_key: "hg_stored" }));
+      process.env.HEYGEN_ACCESS_TOKEN = "at_host";
+      process.env.HEYGEN_API_BASE = "https://proxy.example.com";
+      assert.equal(heygenCredential(), null);
+      assert.throws(() => heygenAuthHeaders(), /no HeyGen credentials/);
+      // HeyGen's own hosts keep every credential source.
+      process.env.HEYGEN_API_BASE = "https://api-canary.heygen.com";
+      assert.equal(heygenAuthMethod(), "oauth");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
