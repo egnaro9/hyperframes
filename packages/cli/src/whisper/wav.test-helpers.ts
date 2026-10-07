@@ -19,3 +19,19 @@ export function encodeWav(samples: ArrayLike<number>, sampleRate: number): Buffe
   head.writeUInt32LE(data.length, 40);
   return Buffer.concat([head, data]);
 }
+
+export function encodeExtensibleWav(samples: ArrayLike<number>, sampleRate: number): Buffer {
+  const pcm = encodeWav(samples, sampleRate);
+  const fmt = Buffer.alloc(48);
+  fmt.write("fmt ", 0, "ascii");
+  fmt.writeUInt32LE(40, 4);
+  pcm.copy(fmt, 8, 20, 36);
+  fmt.writeUInt16LE(0xfffe, 8);
+  fmt.writeUInt16LE(22, 24);
+  fmt.writeUInt16LE(16, 26);
+  fmt.writeUInt32LE(4, 28);
+  Buffer.from("0100000000001000800000aa00389b71", "hex").copy(fmt, 32);
+  const wav = Buffer.concat([pcm.subarray(0, 12), fmt, pcm.subarray(36)]);
+  wav.writeUInt32LE(wav.length - 8, 4);
+  return wav;
+}

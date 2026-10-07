@@ -527,7 +527,10 @@ export async function transcribe(
         onEvent && wavSeconds
           ? (line) => {
               const percent = /progress =\s*(\d+)%/.exec(line)?.[1];
-              if (percent) heard([], (Number(percent) / 100) * wavSeconds);
+              if (percent) {
+                const offsetSeconds = offsetMs / 1000;
+                heard([], offsetSeconds + (Number(percent) / 100) * (wavSeconds - offsetSeconds));
+              }
             }
           : undefined,
     });

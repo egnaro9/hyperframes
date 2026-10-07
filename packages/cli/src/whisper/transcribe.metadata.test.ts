@@ -269,6 +269,19 @@ it("reports progress through audio where whisper prints no segment, once per ste
   ]);
 });
 
+it("maps offset-bearing native progress to the original audio clock", async () => {
+  const samples = new Float32Array(50 * 16_000);
+  samples.fill(0.1, 40 * 16_000);
+  writeFileSync(join(dir, "audio.wav"), encodeWav(samples, 16_000));
+  native.printed.stderr = "whisper_print_progress_callback: progress =  50%\n";
+
+  const { words } = await transcribeStreaming();
+
+  expect(words).toHaveLength(1);
+  expect(words[0]).toMatchObject({ type: "words", words: [] });
+  expect(words[0]!.through).toBeCloseTo(45, 2);
+});
+
 it("asks whisper for progress only when someone streams it", async () => {
   const progressAsked = () =>
     native.exec.mock.calls

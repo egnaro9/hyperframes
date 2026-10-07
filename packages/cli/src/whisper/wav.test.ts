@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { readWav, leadingSilenceOffsetMs } from "./wav.js";
-import { encodeWav } from "./wav.test-helpers.js";
+import { encodeWav, encodeExtensibleWav } from "./wav.test-helpers.js";
 
 let dir: string;
 beforeEach(() => {
@@ -89,3 +89,41 @@ it.each(["text", "stereo", "rate", "byte-rate", "alignment", "truncated", "odd",
     expect(leadingSilenceOffsetMs(wav)).toBe(0);
   },
 );
+
+it("keeps the exact three-second silence plus 100 ms speech tail instead of bypassing decode", () => {
+  const samples = new Float32Array(49_600);
+  samples.fill(0.1, 48_000);
+  expect(leadingSilenceOffsetMs(encodeWav(samples, 16_000))).toBe(0);
+});
+
+it("skips silence in a validated extensible PCM16 WAV", () => {
+  const samples = new Float32Array(4 * 16_000);
+  samples.fill(0.1, 3 * 16_000);
+  expect(leadingSilenceOffsetMs(encodeExtensibleWav(samples, 16_000))).toBe(3000);
+});
+
+it("reads validated extensible PCM16 samples", () => {
+  const wav = readWav(file("extensible.wav", encodeExtensibleWav([0, 0.5, -0.5], 16_000)));
+  expect([...wav.samples]).toEqual([0, 0.5, -0.5]);
+});
+
+it.each(["float", "guid", "valid-bits", "extension-size"])(
+  "rejects uncertain extensible PCM: %s",
+  (kind) => {
+    const samples = new Float32Array(4 * 16_000);
+    samples.fill(0.1, 3 * 16_000);
+    const wav = encodeExtensibleWav(samples, 16_000);
+    if (kind === "float") wav.writeUInt16LE(3, 44);
+    if (kind === "guid") wav[59] = 0;
+    if (kind === "valid-bits") wav.writeUInt16LE(8, 38);
+    if (kind === "extension-size") wav.writeUInt16LE(23, 36);
+    expect(leadingSilenceOffsetMs(wav)).toBe(0);
+    expect(() => readWav(file("uncertain.wav", wav))).toThrow("is not a 16-bit mono PCM WAV");
+  },
+);
+
+it("keeps audio when less than one second remains after a qualifying prefix", () => {
+  const samples = new Float32Array(48_000 + 15_999);
+  samples.fill(0.1, 48_000);
+  expect(leadingSilenceOffsetMs(encodeWav(samples, 16_000))).toBe(0);
+});
