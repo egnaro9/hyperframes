@@ -724,7 +724,7 @@ it("checks media overflow at the default midpoint and applies warning severity",
   });
 });
 
-it("converts progress seeks to time, gates each collector, and keeps the first caption hit", async () => {
+it("converts progress seeks to time, gates each collector, and keeps distinct caption elements", async () => {
   const collectGeometryCandidates = vi.fn(gateCandidates);
   const { report } = await runScenario(
     fakeDriver({
@@ -760,6 +760,13 @@ it("converts progress seeks to time, gates each collector, and keeps the first c
       time: 2,
     }),
     expect.objectContaining({ code: "frame_out_of_frame", severity: "error", time: 4 }),
+    expect.objectContaining({
+      code: "caption_zone_collision",
+      severity: "error",
+      selector: "#later-heading",
+      time: 6,
+      times: [6],
+    }),
   ]);
   expect(report.ok).toBe(false);
 });
@@ -1698,6 +1705,33 @@ describe("layout flag grammar", () => {
 });
 
 describe("sampled finding reporting", () => {
+  it("retains all sampled times for a stationary frame failure", async () => {
+    const { report } = await runScenario(
+      fakeDriver({
+        getDuration: vi.fn(async () => 8),
+        collectGeometryCandidates: vi.fn(async (time: number) => [
+          geometryCandidate({
+            kind: "media",
+            tag: "img",
+            text: "img",
+            selector: "#stationary",
+            rect: fixtureRect(1920, 100, 130, 100),
+            overflow: { right: 130 },
+            time,
+          }),
+        ]),
+      }),
+      { contrast: false, samples: 1, frameCheck: { seek: [0.25, 0.75] } },
+    );
+    expect(report.layout.findings).toEqual([
+      expect.objectContaining({
+        code: "frame_out_of_frame",
+        selector: "#stationary",
+        times: [2, 6],
+      }),
+    ]);
+  });
+
   it("keeps different rules on one element as separate findings", async () => {
     const { report } = await runScenario(
       fakeDriver({

@@ -63,7 +63,6 @@ export interface CheckAnchor {
   sourceFile: string;
   bbox: CheckBbox;
   time: number;
-  /** Sampled occurrences; time remains the representative evidence anchor. */
   times?: number[];
 }
 
