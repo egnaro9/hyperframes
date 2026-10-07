@@ -140,6 +140,10 @@ function withCommentsStripped<T>(
   return { result, restore };
 }
 
+function resolveRelativeUrlPath(fromDir: string, basePath: string): string {
+  return resolve(fromDir, decodeWellFormedEscapes(basePath.replaceAll("\\", "/")));
+}
+
 function rebaseCssUrls(css: string, cssFileDir: string, projectDir: string): string {
   const resolvedRoot = resolve(projectDir);
   const resolvedDir = resolve(cssFileDir);
@@ -149,7 +153,7 @@ function rebaseCssUrls(css: string, cssFileDir: string, projectDir: string): str
     if (!decoded || !isRelativeUrl(decoded)) return full;
     const { basePath, suffix } = splitUrlSuffix(decoded);
     if (!basePath) return full;
-    const absolutePath = resolve(resolvedDir, decodeWellFormedEscapes(basePath));
+    const absolutePath = resolveRelativeUrlPath(resolvedDir, basePath);
     const rebased = encodeUrlPath(relative(resolvedRoot, absolutePath).split(sep).join("/"));
     if (rebased === basePath) return full;
     const escapedSuffix = suffix.replace(
@@ -163,7 +167,7 @@ function rebaseCssUrls(css: string, cssFileDir: string, projectDir: string): str
 function rebaseRelativePath(urlValue: string, fromDir: string, toDir: string): string {
   const { basePath, suffix } = splitUrlSuffix(urlValue.trim());
   if (!basePath) return urlValue;
-  const absolutePath = resolve(fromDir, decodeWellFormedEscapes(basePath));
+  const absolutePath = resolveRelativeUrlPath(fromDir, basePath);
   const rebased = encodeUrlPath(relative(resolve(toDir), absolutePath).split(sep).join("/"));
   return appendSuffixToUrl(rebased, suffix);
 }

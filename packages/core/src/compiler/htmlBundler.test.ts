@@ -1847,6 +1847,21 @@ describe("bundleToSingleHtml", () => {
     expect(styleText(inlined)).toContain(inlinedAs("image/png", "escaped-space-image"));
   });
 
+  it("keeps raw URL backslashes distinct from encoded filename backslashes in linked CSS", async () => {
+    const dir = makeTempProject({
+      "index.html": `<link rel="stylesheet" href="css/theme.css"><div data-composition-id="root" data-width="320" data-height="180"></div>`,
+      "css/theme.css": String.raw`.raw { background: url("assets\\logo.png"); } .encoded { background: url("assets%5Clogo.png"); }`,
+      "css/assets/logo.png": "separator-image",
+      "css/assets\\logo.png": "literal-backslash-image",
+    });
+    const linked = await bundleToSingleHtml(dir, { inlineAssets: false });
+    expect(styleText(linked)).toContain('url("css/assets/logo.png")');
+    expect(styleText(linked)).toContain('url("css/assets%5Clogo.png")');
+    const inlined = await bundleToSingleHtml(dir);
+    expect(styleText(inlined)).toContain(inlinedAs("image/png", "separator-image"));
+    expect(styleText(inlined)).toContain(inlinedAs("image/png", "literal-backslash-image"));
+  });
+
   it("removes CSS line continuations before rebasing linked stylesheet URLs", async () => {
     const dir = makeTempProject({
       "index.html": `<link rel="stylesheet" href="css/theme.css"><div data-composition-id="root" data-width="320" data-height="180"></div>`,

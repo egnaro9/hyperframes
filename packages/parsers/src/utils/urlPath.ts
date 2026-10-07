@@ -36,7 +36,7 @@ export function encodeUrlPath(path: string): string {
 
 export function decodeCssEscapes(text: string): string {
   return text
-    .replace(/\0/g, "\uFFFD")
+    .replaceAll("\0", "\uFFFD")
     .replace(
       /\\(?:([0-9a-f]{1,6})(?:\r\n|[ \t\r\n\f])?|(\r\n|[\n\r\f])|([\s\S]))/gi,
       (
