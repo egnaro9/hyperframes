@@ -3,6 +3,9 @@
  * Handles inline style updates, attribute changes, and text content.
  */
 
+// An attribute value in either quote kind; the other kind may appear inside it (it's.png).
+const QUOTED_VALUE = `(?:"[^"]*"|'[^']*')`;
+
 export function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -207,15 +210,15 @@ function patchInlineStyleInTag(
     const newStyle = Array.from(props.entries())
       .map(([k, v]) => `${k}: ${escapeStyleAttributeValue(v, quote)}`)
       .join("; ");
-    const newTag = tag.replace(styleMatch[0], `style=${quote}${newStyle}${quote}`);
-    return html.replace(tag, newTag);
+    const newTag = tag.replace(styleMatch[0], () => `style=${quote}${newStyle}${quote}`);
+    return html.replace(tag, () => newTag);
   } else {
     // No existing style attribute
     if (value === null) return html; // nothing to remove
     const selfClosing = tag.endsWith("/");
     const base = selfClosing ? tag.slice(0, -1).trimEnd() : tag;
     const newTag = `${base} style="${prop}: ${escapeStyleAttributeValue(value, '"')}"${selfClosing ? " /" : ""}`;
-    return html.replace(tag, newTag);
+    return html.replace(tag, () => newTag);
   }
 }
 
@@ -303,8 +306,9 @@ export function readAttributeByTarget(
   if (!match) return undefined;
 
   const fullAttr = attr.startsWith("data-") ? attr : `data-${attr}`;
-  const valueMatch = new RegExp(`\\b${fullAttr}=(["'])([^"']*)\\1`).exec(match.tag);
-  return valueMatch?.[2] != null ? unescapeHtmlAttribute(valueMatch[2]) : undefined;
+  const valueMatch = new RegExp(`\\b${fullAttr}=(?:"([^"]*)"|'([^']*)')`).exec(match.tag);
+  const value = valueMatch?.[1] ?? valueMatch?.[2];
+  return value != null ? unescapeHtmlAttribute(value) : undefined;
 }
 
 export function readTagSnippetByTarget(html: string, target: PatchTarget): string | undefined {
@@ -322,21 +326,21 @@ function patchAttributeByTarget(
   if (!match) return html;
 
   const fullAttr = attr.startsWith("data-") ? attr : `data-${attr}`;
-  const attrPattern = new RegExp(`\\b${escapeRegex(fullAttr)}=(["'])([^"']*)\\1`);
+  const attrPattern = new RegExp(`\\b${escapeRegex(fullAttr)}=${QUOTED_VALUE}`);
   const tag = match.tag;
 
   if (value === null) {
     // Remove the attribute if present
-    const boolAttrPattern = new RegExp(`\\b${escapeRegex(fullAttr)}(?:=(["'])[^"']*\\1)?`);
+    const boolAttrPattern = new RegExp(`\\b${escapeRegex(fullAttr)}(?:=${QUOTED_VALUE})?`);
     if (!boolAttrPattern.test(tag)) return html;
-    const removePattern = new RegExp(`\\s+${escapeRegex(fullAttr)}(?:=(["'])[^"']*\\1)?`);
+    const removePattern = new RegExp(`\\s+${escapeRegex(fullAttr)}(?:=${QUOTED_VALUE})?`);
     const newTag = tag.replace(removePattern, "");
     return replaceTagAtMatch(html, match, newTag);
   }
 
   const escaped = escapeHtmlAttribute(value);
   if (attrPattern.test(tag)) {
-    const newTag = tag.replace(attrPattern, `${fullAttr}="${escaped}"`);
+    const newTag = tag.replace(attrPattern, () => `${fullAttr}="${escaped}"`);
     return replaceTagAtMatch(html, match, newTag);
   }
 
@@ -359,25 +363,25 @@ function patchAttribute(
 
   const tag = match[1];
   const fullAttr = attr.startsWith("data-") ? attr : `data-${attr}`;
-  const attrPattern = new RegExp(`\\b${escapeRegex(fullAttr)}=(["'])([^"']*)\\1`);
+  const attrPattern = new RegExp(`\\b${escapeRegex(fullAttr)}=${QUOTED_VALUE}`);
 
   if (value === null) {
-    const boolAttrPattern = new RegExp(`\\b${escapeRegex(fullAttr)}(?:=(["'])[^"']*\\1)?`);
+    const boolAttrPattern = new RegExp(`\\b${escapeRegex(fullAttr)}(?:=${QUOTED_VALUE})?`);
     if (!boolAttrPattern.test(tag)) return html;
-    const removePattern = new RegExp(`\\s+${escapeRegex(fullAttr)}(?:=(["'])[^"']*\\1)?`);
+    const removePattern = new RegExp(`\\s+${escapeRegex(fullAttr)}(?:=${QUOTED_VALUE})?`);
     const newTag = tag.replace(removePattern, "");
-    return html.replace(tag, newTag);
+    return html.replace(tag, () => newTag);
   }
 
   const escaped = escapeHtmlAttribute(value);
   if (attrPattern.test(tag)) {
     // Update existing attribute
-    const newTag = tag.replace(attrPattern, `${fullAttr}="${escaped}"`);
-    return html.replace(tag, newTag);
+    const newTag = tag.replace(attrPattern, () => `${fullAttr}="${escaped}"`);
+    return html.replace(tag, () => newTag);
   } else {
     // Add new attribute
     const newTag = tag + ` ${fullAttr}="${escaped}"`;
-    return html.replace(tag, newTag);
+    return html.replace(tag, () => newTag);
   }
 }
 
@@ -454,31 +458,31 @@ function patchHtmlAttributeInTag(
 
     if (value === null || value === "" || value === "false") {
       if (!hasBoolAttr) return html;
-      const removePattern = new RegExp(`\\s+${escapedAttr}(?:=(["'])[^"']*\\1)?`);
+      const removePattern = new RegExp(`\\s+${escapedAttr}(?:=${QUOTED_VALUE})?`);
       const newTag = tag.replace(removePattern, "");
-      return html.replace(tag, newTag);
+      return html.replace(tag, () => newTag);
     }
     if (hasBoolAttr) return html;
     const newTag = tag + ` ${attr}`;
-    return html.replace(tag, newTag);
+    return html.replace(tag, () => newTag);
   }
 
-  const attrPattern = new RegExp(`\\b${escapeRegex(attr)}=(["'])([^"']*)\\1`);
+  const attrPattern = new RegExp(`\\b${escapeRegex(attr)}=${QUOTED_VALUE}`);
   if (value === null) {
     if (!attrPattern.test(tag)) return html;
-    const removePattern = new RegExp(`\\s+${escapeRegex(attr)}=(["'])[^"']*\\1`);
+    const removePattern = new RegExp(`\\s+${escapeRegex(attr)}=${QUOTED_VALUE}`);
     const newTag = tag.replace(removePattern, "");
-    return html.replace(tag, newTag);
+    return html.replace(tag, () => newTag);
   }
 
   const escaped = escapeHtmlAttribute(value);
   if (attrPattern.test(tag)) {
-    const newTag = tag.replace(attrPattern, `${attr}="${escaped}"`);
-    return html.replace(tag, newTag);
+    const newTag = tag.replace(attrPattern, () => `${attr}="${escaped}"`);
+    return html.replace(tag, () => newTag);
   }
 
   const newTag = tag + ` ${attr}="${escaped}"`;
-  return html.replace(tag, newTag);
+  return html.replace(tag, () => newTag);
 }
 
 function patchHtmlAttribute(

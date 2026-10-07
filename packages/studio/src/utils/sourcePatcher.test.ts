@@ -646,3 +646,42 @@ describe("T3 — hfId targeting (spec for R1)", () => {
     expect(result).toContain('<h2 class="b">B</h2>');
   });
 });
+
+describe("file names with special characters", () => {
+  const src = (value: string): PatchOperation => ({
+    type: "html-attribute",
+    property: "src",
+    value,
+  });
+
+  it("replaces a double-quoted value that holds an apostrophe instead of adding a second one", () => {
+    expect(applyPatch(`<img id="a" src="assets/it's.png">`, "a", src("assets/b.png"))).toBe(
+      `<img id="a" src="assets/b.png">`,
+    );
+    expect(applyPatch(`<img id="a" src='assets/say "hi".png'>`, "a", src("b.png"))).toBe(
+      `<img id="a" src="b.png">`,
+    );
+  });
+
+  it("writes $ sequences in a value literally", () => {
+    expect(applyPatch(`<img id="a" src="old.png">`, "a", src("assets/$100 bill.png"))).toBe(
+      `<img id="a" src="assets/$100 bill.png">`,
+    );
+    expect(applyPatch(`<img id="a">`, "a", src("$&$1.png"))).toBe(
+      `<img id="a" src="$&amp;$1.png">`,
+    );
+    expect(
+      applyPatch(`<div id="a" data-src="old">`, "a", {
+        type: "attribute",
+        property: "src",
+        value: "$' and $`",
+      }),
+    ).toBe(`<div id="a" data-src="$' and $\`">`);
+  });
+
+  it("reads a data attribute whose value holds the other quote kind", () => {
+    expect(readAttributeByTarget(`<div id="a" data-title="it's here">`, { id: "a" }, "title")).toBe(
+      "it's here",
+    );
+  });
+});
