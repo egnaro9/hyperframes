@@ -27,6 +27,7 @@ const hashInput: SegmentPlanHashInput = {
   bitrate: undefined,
   pixelFormat: "yuv420p",
   imageFormat: "jpeg",
+  containerExtension: ".mp4",
   useGpu: false,
   outputWidth: 1920,
   outputHeight: 1080,
@@ -34,6 +35,12 @@ const hashInput: SegmentPlanHashInput = {
 };
 
 describe("computeSegmentPlanHash", () => {
+  it("changes when the segment container changes even with the same codec", () => {
+    const mp4 = computeSegmentPlanHash(hashInput);
+    expect(computeSegmentPlanHash({ ...hashInput, containerExtension: ".webm" })).not.toBe(mp4);
+    expect(computeSegmentPlanHash({ ...hashInput, containerExtension: ".mov" })).not.toBe(mp4);
+  });
+
   it("is stable and 16 hex chars", () => {
     const a = computeSegmentPlanHash(hashInput);
     expect(a).toMatch(/^[0-9a-f]{16}$/);
@@ -180,6 +187,24 @@ describe("validateCompletedSegments", () => {
       ],
     };
     expect((await validateCompletedSegments(manifest, "h", async () => 3)).size).toBe(0);
+  });
+
+  it("rejects completed segments when the resolved container changes", async () => {
+    dir = mkdtempSync(join(tmpdir(), "hf-seg-container-"));
+    const good = join(dir, "segment_00000.mp4");
+    writeFileSync(good, "xx");
+    const manifest: SegmentManifest = {
+      version: 1,
+      planHash: computeSegmentPlanHash(hashInput),
+      totalFrames: 3,
+      segmentFrames: 3,
+      completed: [{ index: 0, startFrame: 0, endFrame: 3, path: good, bytes: 2, completedAt: "" }],
+    };
+    expect((await validateCompletedSegments(manifest, manifest.planHash, async () => 3)).size).toBe(
+      1,
+    );
+    const changed = computeSegmentPlanHash({ ...hashInput, containerExtension: ".webm" });
+    expect((await validateCompletedSegments(manifest, changed, async () => 3)).size).toBe(0);
   });
 
   it("skips nothing when the plan hash differs", async () => {

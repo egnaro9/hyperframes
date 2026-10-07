@@ -41,6 +41,7 @@ export interface SegmentPlanHashInput {
   bitrate: string | undefined;
   pixelFormat: string | undefined;
   imageFormat: string;
+  containerExtension: string;
   /** Hardware encoder or not: h264_nvenc and libx264 both report codec "h264" but produce different bytes. */
   useGpu: boolean;
   /** Device-scaled capture size; `width`/`height` are the composition's CSS size. */
@@ -67,6 +68,7 @@ export function computeSegmentPlanHash(input: SegmentPlanHashInput): string {
     input.bitrate ?? "",
     input.pixelFormat ?? "",
     input.imageFormat,
+    input.containerExtension,
     input.useGpu ? "gpu" : "cpu",
     `${input.outputWidth}x${input.outputHeight}`,
     input.motionBlur,

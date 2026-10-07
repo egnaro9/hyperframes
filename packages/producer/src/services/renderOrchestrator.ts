@@ -4549,6 +4549,7 @@ async function executeRenderPipeline(input: {
           bitrate: effectiveBitrate,
           pixelFormat: preset.pixelFormat,
           imageFormat: segmentImageFormat,
+          containerExtension: videoExt,
           useGpu: job.config.useGpu === true,
           // Device-scaled: the capture buffer, not the CSS composition size.
           outputWidth: captureCompositionWidth ?? width,
