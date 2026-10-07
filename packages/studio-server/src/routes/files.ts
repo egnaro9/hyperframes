@@ -838,7 +838,8 @@ function rewriteEntityAttributes(text: string, rewrite: (text: string) => string
       const decoded = decodeAuthoredAttribute(attr.value);
       if (decoded === attr.value) continue;
       let value = escapeHtmlReference(decoded);
-      if (!attr.quote) value = value.replace(/[\t\n\f\r =<>`]/g, (char) => `&#${char.codePointAt(0)!};`);
+      if (!attr.quote)
+        value = value.replace(/[\t\n\f\r =<>`]/g, (char) => `&#${char.codePointAt(0)!};`);
       const source = `<x ${attr.name}=${attr.quote}${value}${attr.quote}>`;
       const updated = rewrite(source);
       if (updated === source) continue;
