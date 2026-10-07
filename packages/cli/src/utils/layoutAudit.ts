@@ -263,7 +263,6 @@ export function collapseStaticLayoutIssues(
     applyPersistenceTier(
       {
         ...issue,
-        time: firstSeen,
         firstSeen,
         lastSeen,
         occurrences,

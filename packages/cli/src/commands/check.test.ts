@@ -1705,6 +1705,50 @@ describe("layout flag grammar", () => {
 });
 
 describe("sampled finding reporting", () => {
+  it("keeps the representative crop time paired with its geometry when dense observations arrive earlier", async () => {
+    const movingOverlap = (time: number): AnchoredLayoutIssue => {
+      const rect = fixtureRect(time * 1000, 20, 300, 80);
+      return {
+        ...layoutIssue("warning", { time, code: "content_overlap" }),
+        rect,
+        bbox: { x: rect.left, y: rect.top, width: rect.width, height: rect.height },
+      };
+    };
+    const captureFindingCrops = vi.fn(async () => []);
+    const { report } = await runScenario(
+      fakeDriver({
+        getDuration: vi.fn(async () => 1),
+        collectLayout: vi.fn(async (time: number) => (time === 0.5 ? [movingOverlap(time)] : [])),
+        collectOverlap: vi.fn(async (time: number) =>
+          time >= 0.125 && time <= 0.75 ? [movingOverlap(time)] : [],
+        ),
+      }),
+      { samples: 2, at: [0.5, 0.875], contrast: false, snapshots: true },
+      { captureFindingCrops },
+    );
+    expect(report.layout.findings).toEqual([
+      expect.objectContaining({
+        code: "content_overlap",
+        severity: "error",
+        time: 0.5,
+        firstSeen: 0.125,
+        times: [0.125, 0.25, 0.375, 0.5, 0.625, 0.75],
+        bbox: { x: 500, y: 20, width: 300, height: 80 },
+      }),
+    ]);
+    expect(captureFindingCrops).toHaveBeenCalledWith(
+      PROJECT,
+      expect.objectContaining({ snapshots: true }),
+      [
+        {
+          filename: "finding-00-content_overlap.png",
+          time: 0.5,
+          bbox: { x: 500, y: 20, width: 300, height: 80 },
+        },
+      ],
+    );
+  });
+
   it("retains all sampled times for a stationary frame failure", async () => {
     const { report } = await runScenario(
       fakeDriver({
