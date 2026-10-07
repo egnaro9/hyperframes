@@ -67,7 +67,7 @@ export default defineCommand({
     },
     model: {
       type: "string",
-      description: `Whisper model (default: ${DEFAULT_MODEL}). Options: tiny.en, base.en, small.en, medium.en, large-v3`,
+      description: `Whisper model (default: ${DEFAULT_MODEL}). Options: tiny, base, small, medium (add .en for English only), large-v3`,
       alias: "m",
     },
     language: {

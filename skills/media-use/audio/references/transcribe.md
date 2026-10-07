@@ -1,6 +1,6 @@
 # Transcription
 
-Create normalized word-level timestamps. **Always specify `--model` explicitly** — the CLI default is `small.en`, which silently translates non-English audio into English.
+Create normalized word-level timestamps. **Always specify `--model` explicitly.** The CLI default is the multilingual `small`, which detects the language from three spread-out windows of the audio; an `.en` model silently turns non-English audio into English.
 
 ```bash
 npx hyperframes transcribe audio.mp3  --model small.en             # known English

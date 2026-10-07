@@ -7,7 +7,8 @@ import { findFFmpeg } from "../browser/ffmpeg.js";
 import { downloadFile } from "../utils/download.js";
 
 const MODELS_DIR = join(homedir(), ".cache", "hyperframes", "whisper", "models");
-const DEFAULT_MODEL = "small.en";
+// Multilingual: an English-only default turned every other language into English text.
+const DEFAULT_MODEL = "small";
 
 export type WhisperSource = "env" | "system" | "brew" | "build";
 

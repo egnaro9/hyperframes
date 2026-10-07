@@ -1,8 +1,9 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { transcribe, type TranscribeProgress } from "./transcribe.js";
+import { encodeWav } from "./wav.test-helpers.js";
 
 const native = vi.hoisted(() => ({
   exec: vi.fn(),
@@ -24,14 +25,16 @@ vi.mock("node:child_process", async () => {
       const child = { stdout: new PassThrough(), stderr: new PassThrough() };
       setImmediate(() => {
         let failure: unknown = null;
+        let said: unknown = null;
         try {
-          native.exec(command, args);
+          said = native.exec(command, args);
         } catch (err) {
           failure = err;
         }
+        const stderr = (said as { stderr?: string } | null)?.stderr ?? native.printed.stderr;
         child.stdout.end(native.printed.stdout);
-        child.stderr.end(native.printed.stderr);
-        done(failure, native.printed.stdout, native.printed.stderr);
+        child.stderr.end(stderr);
+        done(failure, native.printed.stdout, stderr);
       });
       return child;
     },
@@ -264,5 +267,66 @@ it("names the timeout knob when whisper outlives its own timeout", async () => {
   });
   await expect(transcribe(join(dir, "audio.wav"), dir, { model: "small" })).rejects.toThrow(
     "Whisper transcription exceeded",
+  );
+});
+
+/** 100 s of prepared WAV: the first 40 s carry sample value 2 (loud music to the stand-in), the rest 1 (Spanish). */
+function musicThenSpanish() {
+  const samples = Array.from({ length: 100 * 16_000 }, (_, i) => (i < 40 * 16_000 ? 2 : 1) / 32768);
+  writeFileSync(join(dir, "audio.wav"), encodeWav(samples, 16_000));
+}
+
+/** whisper-cli's detection as the real one answers a window: music near p = 0.5, speech confidently. */
+function detectsByWindow(answer: (sample: number) => string) {
+  const previous = native.exec.getMockImplementation()!;
+  native.exec.mockImplementation((command: string, args: string[]) => {
+    if (command !== "whisper-cli" || !args.includes("--detect-language"))
+      return previous(command, args);
+    // Whisper hears the whole window; the stand-in judges it by its middle.
+    const sample = readFileSync(args.at(-1)!).readInt16LE(44 + 15 * 32_000);
+    return { stderr: `whisper_full_with_state: auto-detected language: ${answer(sample)}\n` };
+  });
+}
+
+const languagePassed = () =>
+  native.exec.mock.calls
+    .filter(([command, args]) => command === "whisper-cli" && !args.includes("--detect-language"))
+    .map(([, args]) => args[args.indexOf("--language") + 1]);
+
+it("a music intro does not decide the language: windows spread over the clip do", async () => {
+  musicThenSpanish();
+  detectsByWindow((sample) => (sample === 2 ? "en (p = 0.534956)" : "es (p = 0.983324)"));
+  const result = await transcribe(join(dir, "audio.wav"), dir, { model: "small" });
+  const detections = native.exec.mock.calls.filter(([, args]) =>
+    args.includes("--detect-language"),
+  );
+  expect(detections).toHaveLength(3);
+  expect(languagePassed()).toEqual(["es"]);
+  expect(result.detectedLanguage).toBe("es");
+});
+
+it("windows that disagree leave the language to whisper's own pick", async () => {
+  musicThenSpanish();
+  let n = 0;
+  detectsByWindow(() => `${["en", "es", "fr"][n++]} (p = 0.95)`);
+  await transcribe(join(dir, "audio.wav"), dir, { model: "small" });
+  expect(languagePassed()).toEqual(["auto"]);
+});
+
+it("a detection that fails leaves the language to whisper's own pick", async () => {
+  musicThenSpanish();
+  const previous = native.exec.getMockImplementation()!;
+  native.exec.mockImplementation((command: string, args: string[]) => {
+    if (args.includes("--detect-language")) throw new Error("unknown argument: --detect-language");
+    return previous(command, args);
+  });
+  const said: string[] = [];
+  await transcribe(join(dir, "audio.wav"), dir, {
+    model: "small",
+    onProgress: (m) => said.push(m),
+  });
+  expect(languagePassed()).toEqual(["auto"]);
+  expect(said).toContain(
+    "Language detection failed (unknown argument: --detect-language); whisper picks it.",
   );
 });

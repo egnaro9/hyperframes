@@ -3,16 +3,32 @@ import { execFile, execFileSync } from "node:child_process";
 import { once } from "node:events";
 import { createInterface } from "node:readline";
 import type { Readable } from "node:stream";
-import { existsSync, readFileSync, mkdirSync, rmSync, statSync, unlinkSync } from "node:fs";
+import {
+  existsSync,
+  readFileSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  statSync,
+  unlinkSync,
+} from "node:fs";
 import { join, extname } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { findFFmpeg, findFFprobe, getFFmpegInstallHint } from "../browser/ffmpeg.js";
+import { normalizeErrorMessage } from "../utils/errorMessage.js";
 import { stoppedByCancelSignal } from "../utils/renderCancellation.js";
 import { ensureWhisper, ensureModel, hasFFmpeg, DEFAULT_MODEL } from "./manager.js";
-import { findWavChunk } from "./wav.js";
+import { findWavChunk, writeWavWindow } from "./wav.js";
 import type { Word } from "./normalize.js";
 import { emitWords } from "./progress.js";
+import {
+  detectionWindows,
+  parseDetection,
+  pickLanguage,
+  WINDOW_SECONDS,
+  type LanguageVote,
+} from "./language.js";
 
 const WHISPER_TIMEOUT_FLOOR_MS = 300_000;
 const WHISPER_TIMEOUT_PER_AUDIO_SECOND_MS = 10_000;
@@ -473,9 +489,19 @@ export async function transcribe(
   const wavPath = prepareWav(inputPath, options?.onProgress);
 
   const automaticLanguage = options?.language === undefined && !model.endsWith(".en");
-  const language = options?.language ?? (automaticLanguage ? "auto" : "en");
-  options?.onProgress?.("Transcribing...");
   const wavSeconds = getPreparedWavDurationSeconds(wavPath);
+  const speechOnsetSeconds = detectSpeechOnset(wavPath);
+  const signal = options?.startCancellation?.();
+  const picked = automaticLanguage
+    ? await languageFromWindows(whisper.executablePath, { model, modelPath }, wavPath, {
+        seconds: wavSeconds,
+        onset: speechOnsetSeconds,
+        signal,
+        onProgress: options?.onProgress,
+      })
+    : null;
+  const language = options?.language ?? picked ?? (automaticLanguage ? "auto" : "en");
+  options?.onProgress?.("Transcribing...");
   options?.onEvent?.({
     type: "progress",
     phase: "transcription",
@@ -514,7 +540,7 @@ export async function transcribe(
   try {
     await runWhisper(whisper.executablePath, whisperArgs, {
       timeoutMs: whisperTimeoutMs,
-      signal: options?.startCancellation?.(),
+      signal,
       onStdout:
         onEvent &&
         ((line) => {
@@ -550,9 +576,10 @@ export async function transcribe(
   const transcript = JSON.parse(readFileSync(transcriptPath, "utf-8"));
   const reportedLanguage: unknown = transcript.result?.language;
   const detectedLanguage =
-    automaticLanguage && typeof reportedLanguage === "string" && reportedLanguage.length > 0
+    picked ??
+    (automaticLanguage && typeof reportedLanguage === "string" && reportedLanguage.length > 0
       ? reportedLanguage
-      : null;
+      : null);
   const segments = transcript.transcription ?? [];
 
   let wordCount = 0;
@@ -564,10 +591,6 @@ export async function transcribe(
       if (token.offsets?.to > maxEnd) maxEnd = token.offsets.to;
     }
   }
-
-  // 7. Detect speech onset before cleaning up the WAV
-  options?.onProgress?.("Detecting speech onset...");
-  const speechOnsetSeconds = detectSpeechOnset(wavPath);
 
   // Clean up temp WAV if we created one
   if (wavPath !== inputPath) {
@@ -614,6 +637,53 @@ function segmentWords(line: string): { words: Word[]; end: number } | null {
 }
 
 /** Resolves once whisper exits and both its streams are read, so no printed line is lost. */
+/** The language up to three windows spread over the speech agree on; null keeps whisper's own pick, which hears
+ * only the first 30 s (a music intro decided whole clips). A failed detection keeps it too, said aloud. */
+async function languageFromWindows(
+  executable: string,
+  { model, modelPath }: { model: string; modelPath: string },
+  wavPath: string,
+  clip: {
+    seconds: number | null;
+    onset: number | null;
+    signal?: AbortSignal;
+    onProgress?: (message: string) => void;
+  },
+): Promise<string | null> {
+  const starts = clip.seconds === null ? [] : detectionWindows(clip.seconds, clip.onset);
+  if (starts.length === 0) return null;
+  clip.onProgress?.("Detecting the language...");
+  const dir = mkdtempSync(join(tmpdir(), "hyperframes-language-"));
+  try {
+    const votes: LanguageVote[] = [];
+    for (const [i, start] of starts.entries()) {
+      const window = join(dir, `${i}.wav`);
+      writeWavWindow(wavPath, window, start, WINDOW_SECONDS);
+      await runWhisper(
+        executable,
+        ["--model", modelPath, "--language", "auto", "--detect-language", window],
+        {
+          timeoutMs: resolveWhisperTimeoutMs(WINDOW_SECONDS, { model }),
+          signal: clip.signal,
+          onStderr: (line) => {
+            const vote = parseDetection(line);
+            if (vote) votes.push(vote);
+          },
+        },
+      );
+    }
+    return pickLanguage(votes);
+  } catch (err) {
+    if (clip.signal?.aborted) throw err;
+    clip.onProgress?.(
+      `Language detection failed (${normalizeErrorMessage(err)}); whisper picks it.`,
+    );
+    return null;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 async function runWhisper(
   executable: string,
   args: string[],
