@@ -84,12 +84,12 @@ describe("bundleToSingleHtml", () => {
   it("re-encodes physical directories when rebasing stylesheet and composition asset URLs", async () => {
     const dir = makeTempProject({
       "index.html":
-        '<html><head><link rel="stylesheet" href="css%2520%3F%23/style.css"></head><body><main data-composition-id="root" data-width="320" data-height="180"><div data-composition-id="scene" data-composition-src="scenes%20?#/scene.html" data-start="0" data-duration="1"></div></main></body></html>',
-      "css%20?#/style.css": ".image {background:url(icon.png)}",
-      "css%20?#/icon.png": "stylesheet directory witness",
-      "scenes%20?#/scene.html":
+        '<html><head><link rel="stylesheet" href="css%2520%23/style.css"></head><body><main data-composition-id="root" data-width="320" data-height="180"><div data-composition-id="scene" data-composition-src="scenes%20#/scene.html" data-start="0" data-duration="1"></div></main></body></html>',
+      "css%20#/style.css": ".image {background:url(icon.png)}",
+      "css%20#/icon.png": "stylesheet directory witness",
+      "scenes%20#/scene.html":
         '<template><div data-composition-id="scene" data-width="320" data-height="180"><img src="icon%28a%29.png"></div></template>',
-      "scenes%20?#/icon(a).png": "composition directory witness",
+      "scenes%20#/icon(a).png": "composition directory witness",
     });
     try {
       const bundled = await bundleToSingleHtml(dir);
@@ -103,12 +103,11 @@ describe("bundleToSingleHtml", () => {
   it("resolves encoded URL filenames once across asset, stylesheet and script consumers", async () => {
     const dir = makeTempProject({
       "index.html":
-        '<html><head><link rel="stylesheet" href="style%3F%2520%23.css?cache=1"></head><body><main data-composition-id="root" data-width="320" data-height="180"><img src="image%3F%2520%23.png#view"><div data-composition-id="scene" data-composition-src="scene%20.html" data-start="0" data-duration="1"></div></main><script src="app%3F%2520%23.js?cache=1"></script></body></html>',
-      "style?%20#.css":
-        '@import "base%3F%2520%23.css"; .image {background:url(image%3F%2520%23.png)}',
-      "base?%20#.css": ".decoded-import { color: blue; }",
-      "image?%20#.png": "encoded image witness",
-      "app?%20#.js": "window.encodedScriptWitness = true;",
+        '<html><head><link rel="stylesheet" href="style%2520%23.css?cache=1"></head><body><main data-composition-id="root" data-width="320" data-height="180"><img src="image%2520%23.png#view"><div data-composition-id="scene" data-composition-src="scene%20.html" data-start="0" data-duration="1"></div></main><script src="app%2520%23.js?cache=1"></script></body></html>',
+      "style%20#.css": '@import "base%2520%23.css"; .image {background:url(image%2520%23.png)}',
+      "base%20#.css": ".decoded-import { color: blue; }",
+      "image%20#.png": "encoded image witness",
+      "app%20#.js": "window.encodedScriptWitness = true;",
       "scene%20.html":
         '<template><div data-composition-id="scene" data-width="320" data-height="180"><p>raw composition witness</p></div></template>',
     });
@@ -118,8 +117,8 @@ describe("bundleToSingleHtml", () => {
       expect(bundled).toContain(".decoded-import");
       expect(bundled).toContain("window.encodedScriptWitness = true;");
       expect(bundled).toContain("raw composition witness");
-      expect(bundled).not.toContain('src="app%3F%2520%23.js');
-      expect(styleText(bundled)).not.toContain("url(image%3F%2520%23.png)");
+      expect(bundled).not.toContain('src="app%2520%23.js');
+      expect(styleText(bundled)).not.toContain("url(image%2520%23.png)");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

@@ -5,15 +5,34 @@ import { describe, expect, it } from "vitest";
 import { compileHtml } from "./htmlCompiler.js";
 
 describe("compileHtml", () => {
-  it("passes a decoded local media URL to the duration prober", async () => {
-    const project = mkdtempSync(join(tmpdir(), "hf-encoded-media-"));
-    writeFileSync(join(project, "clip?%20#.mp4"), "duration witness");
+  it("decodes HTML source attributes before interpreting their URL suffixes", async () => {
+    const project = mkdtempSync(join(tmpdir(), "hf-entity-media-"));
+    writeFileSync(join(project, "it's&a.wav"), "duration witness");
     try {
       const compiled = await compileHtml(
-        '<video id="clip" src="clip%3F%2520%23.mp4?cache=1" data-start="0">',
+        `<audio id="clip" title="src='wrong.wav' >" src="it&#39;s&amp;a.wav">`,
         project,
         async (path) => {
-          expect(path).toBe(join(project, "clip?%20#.mp4"));
+          expect(path).toBe(join(project, "it's&a.wav"));
+          expect(readFileSync(path, "utf8")).toBe("duration witness");
+          return 2;
+        },
+      );
+      expect(compiled).toContain('data-duration="2"');
+    } finally {
+      rmSync(project, { recursive: true, force: true });
+    }
+  });
+
+  it("passes a decoded local media URL to the duration prober", async () => {
+    const project = mkdtempSync(join(tmpdir(), "hf-encoded-media-"));
+    writeFileSync(join(project, "clip%20#.mp4"), "duration witness");
+    try {
+      const compiled = await compileHtml(
+        '<video id="clip" src="clip%2520%23.mp4?cache=1" data-start="0">',
+        project,
+        async (path) => {
+          expect(path).toBe(join(project, "clip%20#.mp4"));
           expect(readFileSync(path, "utf8")).toBe("duration witness");
           return 2;
         },

@@ -9,6 +9,37 @@ import {
 } from "./sourcePatcher";
 
 describe("applyPatchByTarget", () => {
+  it("removes all duplicate boolean attributes so unmuting cannot reveal another", () => {
+    expect(
+      applyPatch(`<video id="clip" muted muted></video>`, "clip", {
+        type: "html-attribute",
+        property: "muted",
+        value: null,
+      }),
+    ).toBe(`<video id="clip"></video>`);
+  });
+
+  it("locates Unicode custom tags and respects the first duplicate attribute", () => {
+    const html = `<my-élement id="real" id="other" data-duration="1"></my-élement>`;
+    const op: PatchOperation = { type: "attribute", property: "duration", value: "2" };
+    expect(applyPatch(html, "real", op)).toContain('data-duration="2"');
+    expect(applyPatch(html, "other", op)).toBe(html);
+  });
+
+  it("reads and patches only the real source outside quoted attribute content", () => {
+    const html = `<video id="hero" title="example src='other.mp4'" data-src="lazy.mp4" src="assets/it's.mp4"></video>`;
+    expect(readTagAttribute(html, "src")).toBe("assets/it's.mp4");
+    const op: PatchOperation = { type: "html-attribute", property: "src", value: "new.mp4" };
+    const expected = `<video id="hero" title="example src='other.mp4'" data-src="lazy.mp4" src="new.mp4"></video>`;
+    expect(applyPatch(html, "hero", op)).toBe(expected);
+    expect(applyPatchByTarget(html, { id: "hero" }, op)).toBe(expected);
+  });
+
+  it("does not locate a target through a prefixed or quoted id", () => {
+    const html = `<video data-id="hero" title="id='hero'" src="other.mp4"></video><video id="hero" src="real.mp4"></video>`;
+    expect(readTagSnippetByTarget(html, { id: "hero" })).toContain('src="real.mp4"');
+  });
+
   it.each(['"', "'"])("patches long and multiline styles quoted with %s", (quote) => {
     const otherQuote = quote === '"' ? "'" : '"';
     const op: PatchOperation = { type: "inline-style", property: "opacity", value: "0.5" };

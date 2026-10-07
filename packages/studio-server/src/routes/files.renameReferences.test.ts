@@ -19,6 +19,47 @@ function fileRoutesFor(project: string): Hono {
 }
 
 describe("rename references", () => {
+  it("does not classify active URL fields through script-looking comments", () => {
+    expect(
+      rewrite(`<!-- <script> --><img src="a.png"><!-- </script> -->`, "a.png", "a?#.png", false),
+    ).toBe(`<!-- <script> --><img src="a%3F%23.png"><!-- </script> -->`);
+  });
+  it("keeps unquoted entity-spelled references valid when the new name contains spaces", () => {
+    expect(rewrite(`<img src=a&amp;b.png>`, "a&b.png", "new file.png", false)).toBe(
+      `<img src=new&#32;file.png>`,
+    );
+    expect(
+      rewrite(`<div data-composition-src=a&amp;b.html>`, "a&b.html", "new file.html", false),
+    ).toBe(`<div data-composition-src=new&#32;file.html>`);
+  });
+
+  it("keeps a URL suffix distinct from a longer physical filename that exists", () => {
+    const rename = referenceRewriter("a.png", "new.png", false, ["a.png?x", "a.png#x"]);
+    expect(rename(`<img src="a.png?x"><img src="a.png#x">`)).toBe(
+      `<img src="new.png?x"><img src="new.png#x">`,
+    );
+  });
+
+  it("does not borrow HTML decoding from a later URL field for a raw script", () => {
+    const text = `<script>const p = "a&amp;b.png";</script><img src="other.png">`;
+    expect(rewrite(text, "a&b.png", "new.png", false)).toBe(text);
+  });
+
+  it("encodes each srcset candidate and SVG href for its URL consumer", () => {
+    const text = `<img srcset="old.png 1x, other.png 2x"><image xlink:href="old.png"/>`;
+    expect(rewrite(text, "old.png", "new file%#.png", false)).toBe(
+      `<img srcset="new%20file%25%23.png 1x, other.png 2x"><image xlink:href="new file%25%23.png"/>`,
+    );
+  });
+
+  it("does not rename a URL query as part of the physical filename", () => {
+    const text = `<img src="a.png?x"><img src="other.png?asset=a.png">`;
+    expect(rewrite(text, "a.png?x", "new.png", false)).toBe(text);
+    expect(rewrite(`<img src="other.png?asset=a.png">`, "a.png", "new.png", false)).toBe(
+      `<img src="other.png?asset=a.png">`,
+    );
+  });
+
   it("does not treat an attribute-looking string inside a raw HTML value as a URL field", () => {
     const text = `<div data-note="src='old%20file.png'"></div>`;
     expect(rewrite(text, "old file.png", "new file.png", false)).toBe(text);

@@ -3,7 +3,12 @@
 // parallel — two writers, same switch-case interface. Structural duplication
 // is load-bearing (both paths must remain testable in isolation).
 import type { Hono } from "hono";
-import { encodeUrlPath } from "@hyperframes/parsers/asset-paths";
+import { encodeUrlPath, decodedUrlPath } from "@hyperframes/parsers/asset-paths";
+import {
+  scanHtmlOpeningTags,
+  decodeAuthoredAttribute,
+  HTML_ATTRIBUTE_ENTITIES,
+} from "@hyperframes/parsers";
 import { bodyLimit } from "hono/body-limit";
 import {
   closeSync,
@@ -702,17 +707,7 @@ const SEPARATOR = String.raw`\\{0,2}[\\/]`;
 const REFERENCE_START = String.raw`(?<![\w./\\+-])`;
 const FILE_END = String.raw`(?![\w-]|\.\w)`;
 
-const ENTITY_SPELLINGS: Record<string, readonly string[]> = {
-  "&": ["&amp;"],
-  "'": ["&#39;", "&apos;"],
-  '"': ["&quot;"],
-};
-const ENTITY_CHARACTERS = new Map(
-  Object.entries(ENTITY_SPELLINGS).flatMap(([char, spellings]) =>
-    spellings.map((spelling) => [spelling, char] as const),
-  ),
-);
-const ENTITY_REFERENCE_PATTERN = new RegExp([...ENTITY_CHARACTERS.keys()].join("|"));
+const ENTITY_SPELLINGS = HTML_ATTRIBUTE_ENTITIES;
 
 function referenceSpellings(char: string): string {
   const spellings = [escapeRegExp(char)];
@@ -720,6 +715,9 @@ function referenceSpellings(char: string): string {
   if (encoded !== char)
     spellings.push(encoded.replace(/[A-F]/g, (hex) => `[${hex}${hex.toLowerCase()}]`));
   if (ENTITY_SPELLINGS[char]) spellings.push(...ENTITY_SPELLINGS[char]);
+  if (["'", '"', "`", "$", " ", "(", ")"].includes(char)) {
+    spellings.push(escapeRegExp(`&#92;${char}`), escapeRegExp(`&#92;${escapeHtmlReference(char)}`));
+  }
   const scriptSpelling = escapeQuotedReference(char, '"');
   if (scriptSpelling !== char) spellings.push(escapeRegExp(scriptSpelling));
   if (["'", "`", "$", " ", "(", ")"].includes(char)) spellings.push(escapeRegExp(`\\${char}`));
@@ -731,6 +729,13 @@ function referenceSpellings(char: string): string {
 }
 
 type ReferenceSyntax = "html" | "script" | "css" | "plain";
+interface ReferenceContext {
+  syntax: ReferenceSyntax;
+  url: boolean;
+  htmlAttribute: boolean;
+  encodeAll: boolean;
+  quote: string;
+}
 
 function escapeHtmlReference(path: string): string {
   return path.replace(/[&"']/g, (char) => ENTITY_SPELLINGS[char]![0]!);
@@ -747,14 +752,11 @@ function spellLike(
   reference: string,
   path: string,
   oldPath: string,
-  syntax: ReferenceSyntax,
-  quote: string,
-  url: boolean,
+  context: ReferenceContext,
 ): string {
-  if (url && reference !== oldPath && /%[0-9A-Fa-f]{2}/.test(reference)) return encodeUrlPath(path);
-  if (syntax === "html" && reference !== oldPath && ENTITY_REFERENCE_PATTERN.test(reference)) {
-    return escapeHtmlReference(url ? path.replace(/[?%#]/g, encodeUrlPath) : path);
-  }
+  const { syntax, quote, url, encodeAll } = context;
+  if (url && (encodeAll || (reference !== oldPath && /%[0-9A-Fa-f]{2}/.test(reference))))
+    return encodeUrlPath(path);
   switch (syntax) {
     case "html": {
       const escaped = escapeHtmlReference(url ? path.replace(/[?%#]/g, encodeUrlPath) : path);
@@ -841,50 +843,32 @@ export function referenceRewriter(
       window = Math.max(window, path.length * 9);
     }
   }
-  const normalized = (
-    text: string,
-    syntax: ReferenceSyntax,
-    url: boolean,
-    htmlAttribute = false,
-  ) => {
-    let value = decodeQuotedReference(text, syntax);
-    if (syntax === "html" || htmlAttribute) {
-      value = value.replace(
-        new RegExp(`${ENTITY_REFERENCE_PATTERN.source}|&#([0-9]{1,7});`, "g"),
-        (entity, code: string | undefined) => {
-          if (code === undefined) return ENTITY_CHARACTERS.get(entity)!;
-          const value = Number(code);
-          return value <= 0x10ffff ? String.fromCodePoint(value) : entity;
-        },
-      );
+  const normalized = (text: string, context: ReferenceContext, full = false) => {
+    let value = text;
+    if (context.syntax === "html" || context.htmlAttribute) {
+      value = decodeAuthoredAttribute(value);
     }
-    if (url) value = decodeWellFormedEscapes(value);
+    value = decodeQuotedReference(value, context.syntax);
+    if (context.url) value = full ? decodedUrlPath(value) : decodeWellFormedEscapes(value);
     return value.replace(/\\{0,2}[\\/]/g, "/");
   };
   return (text, syntax = "html") => {
     pattern.lastIndex = 0;
     if (!pattern.test(text)) return text;
     pattern.lastIndex = 0;
-    const inlineRegions =
-      syntax === "html"
-        ? [...text.matchAll(/<(script|style)\b[^>]*>([\s\S]*?)<\/\1\s*>/gi)].map((match) => ({
-            start: match.index! + match[0].indexOf(">") + 1,
-            end: match.index! + match[0].lastIndexOf("<"),
-            syntax: match[1]!.toLowerCase() === "style" ? ("css" as const) : ("script" as const),
-          }))
-        : [];
-    const attributes =
-      syntax === "html"
-        ? [...text.matchAll(/<[A-Za-z][\w:-]*(?:[^"'<>]|"[^"]*"|'[^']*')*>/g)].flatMap((tag) =>
-            [...tag[0].matchAll(/([^\s"'=<>`/]+)\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/g)].map(
-              (attr) => ({
-                name: attr[1]!.toLowerCase(),
-                start: tag.index! + attr.index!,
-                end: tag.index! + attr.index! + attr[0].length,
-              }),
-            ),
-          )
-        : [];
+    const tags = syntax === "html" ? scanHtmlOpeningTags(text) : [];
+    const inlineRegions = tags
+      .filter(
+        (tag) => tag.closed && ["script", "style"].includes(tag.name) && tag.rawTextEnd !== null,
+      )
+      .map((tag) => ({
+        start: tag.end,
+        end: tag.rawTextEnd!,
+        syntax: tag.name === "style" ? ("css" as const) : ("script" as const),
+      }));
+    const attributes = tags.flatMap((tag) =>
+      tag.attributes.flatMap((attr) => (attr.kind === "value" ? [attr] : [])),
+    );
     const cssContexts =
       syntax === "css"
         ? [{ start: 0, end: text.length, htmlAttribute: false }]
@@ -898,21 +882,43 @@ export function referenceRewriter(
           ];
     const cssFields = (pattern: RegExp) =>
       cssContexts.flatMap((context) =>
-        [...text.slice(context.start, context.end).matchAll(pattern)].map((match) => ({
-          start: context.start + match.index!,
-          end: context.start + match.index! + match[0].length,
-          syntax: "css" as const,
-          htmlAttribute: context.htmlAttribute,
-        })),
+        [...text.slice(context.start, context.end).matchAll(pattern)].map((match) => {
+          const prefix = /^(?:url\(\s*|@import\s+)/i.exec(match[0])![0];
+          const rest = match[0].slice(prefix.length);
+          const delimiter = context.htmlAttribute
+            ? /^(?:["']|&quot;|&#39;|&apos;)/.exec(rest)?.[0]
+            : /^["']/.exec(rest)?.[0];
+          const start = context.start + match.index! + prefix.length + (delimiter?.length ?? 0);
+          return {
+            start,
+            end: context.start + match.index! + match[0].length,
+            syntax: "css" as const,
+            htmlAttribute: context.htmlAttribute,
+            encodeAll: true,
+          };
+        }),
       );
     const urlRegions = [
       ...attributes
-        .filter((attr) => ["src", "href", "poster"].includes(attr.name))
+        .filter((attr) => ["src", "href", "poster", "xlink:href"].includes(attr.name))
         .map((attr) => ({
-          ...attr,
+          start: attr.valueStart + (/^[\t\n\f\r ]*/.exec(attr.value)?.[0].length ?? 0),
+          end: attr.valueEnd,
           syntax: "html" as const,
           htmlAttribute: true,
+          encodeAll: false,
         })),
+      ...attributes
+        .filter((attr) => attr.name === "srcset")
+        .flatMap((attr) =>
+          [...attr.value.matchAll(/(^|,)[\t\n\f\r ]*([^,\t\n\f\r ]+)/g)].map((match) => ({
+            start: attr.valueStart + match.index! + match[0].length - match[2]!.length,
+            end: attr.valueStart + match.index! + match[0].length,
+            syntax: "html" as const,
+            htmlAttribute: true,
+            encodeAll: true,
+          })),
+        ),
       ...cssFields(
         /\burl\((?:\s*"(?:\\.|[^"\\])*"\s*|\s*'(?:\\.|[^'\\])*'\s*|(?:\\.|[^)\\])*)\)/gi,
       ),
@@ -929,22 +935,22 @@ export function referenceRewriter(
       while (urlRegions[urlIndex] && urlRegions[urlIndex]!.end <= offset) urlIndex++;
       const urlRegion = urlRegions[urlIndex];
       const url = matchSyntax !== "script" && !!urlRegion && offset >= urlRegion.start;
-      const fieldSyntax = url ? urlRegion!.syntax : matchSyntax;
-      const reference = match.slice(lead.length);
-      if (normalized(reference, fieldSyntax, url, urlRegion?.htmlAttribute) !== oldPath)
-        return match;
-      const at = offset + lead.length;
-      const head = normalized(
-        text.slice(Math.max(0, at - window), at),
-        fieldSyntax,
+      const context: ReferenceContext = {
+        syntax: url ? urlRegion!.syntax : matchSyntax,
         url,
-        urlRegion?.htmlAttribute,
-      );
+        htmlAttribute: url && urlRegion!.htmlAttribute,
+        encodeAll: url && urlRegion!.encodeAll,
+        quote: text[offset - 1] ?? "",
+      };
+      if (url && offset !== urlRegion!.start) return match;
+      const reference = match.slice(lead.length);
+      if (normalized(reference, context, true) !== oldPath) return match;
+      const at = offset + lead.length;
+      const head = normalized(text.slice(Math.max(0, at - window), at), context);
       const tail = normalized(
         text.slice(offset + match.length, offset + match.length + window),
-        fieldSyntax,
-        url,
-        urlRegion?.htmlAttribute,
+        context,
+        context.url,
       );
       const inLonger = [...afterLengths].some((after) => {
         const befores = tail.length >= after && around.get(tail.slice(0, after));
@@ -956,8 +962,7 @@ export function referenceRewriter(
         );
       });
       if (inLonger) return match;
-      const quote = text[offset - 1] ?? "";
-      return `${lead}${spellLike(reference, newPath, oldPath, fieldSyntax, quote, url)}`;
+      return `${lead}${spellLike(reference, newPath, oldPath, context)}`;
     });
   };
 }
@@ -3614,7 +3619,12 @@ export function registerFileRoutes(api: Hono, adapter: StudioApiAdapter): void {
     const body: unknown = await c.req.json();
     const newPath =
       body !== null && typeof body === "object" && "newPath" in body ? body.newPath : undefined;
-    if (typeof newPath !== "string" || !newPath || /[\0\uD800-\uDFFF]/u.test(newPath)) {
+    if (
+      typeof newPath !== "string" ||
+      !newPath ||
+      newPath.includes("\0") ||
+      /[\uD800-\uDFFF]/u.test(newPath)
+    ) {
       return c.json({ error: "newPath required" }, 400);
     }
 

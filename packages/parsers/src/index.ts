@@ -26,3 +26,5 @@ export {
   CANONICAL_FONT_DISPLAY_NAMES,
   resolveAliasDisplayName,
 } from "./fontAliases.js";
+
+export * from "./htmlAttributeSpans.js";
