@@ -1,6 +1,6 @@
 import { fetchMedia } from "../../../scripts/lib/media-fetch.mjs";
 // heygen.mjs — vendored HeyGen REST helpers (auth + transport) for the audio
-// pipeline. The credential resolver matches the hyperframes CLI auth: first
+// pipeline. The credential resolver uses the shared HeyGen store: first
 // usable source wins — a host-injected OAuth $HEYGEN_ACCESS_TOKEN (Bearer) →
 // $HEYGEN_API_KEY / $HYPERFRAMES_API_KEY → a nearby .env → ~/.heygen/
 // credentials (oauth → Bearer, else api_key → X-Api-Key; $HEYGEN_CONFIG_DIR
@@ -10,7 +10,8 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
-export const HEYGEN_BASE = "https://api.heygen.com/v3";
+const apiHost = process.env.HEYGEN_API_URL || "https://api.heygen.com";
+export const HEYGEN_BASE = `${apiHost.replace(/\/+$/, "")}/v3`;
 export const HEYGEN_CLI_SOURCE_HEADERS = { "X-HeyGen-Source": "cli" };
 // Tool-attribution sent on EVERY media-use HeyGen call regardless of auth type, so
 // the backend can isolate media-use consumption from other free TTS / avatar video.

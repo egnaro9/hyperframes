@@ -1,3 +1,5 @@
+import { createServer } from "node:http";
+import { once } from "node:events";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
@@ -182,4 +184,50 @@ test("heygenAuthHeaders says to fix an unreadable credentials path, and to log i
       rmSync(dir, { recursive: true, force: true });
     }
   });
+});
+
+test("host-managed OAuth reaches its paired API host in both distributed helpers", async () => {
+  const originalFetch = globalThis.fetch;
+  const previousHost = process.env.HEYGEN_API_URL;
+  const previousToken = process.env.HEYGEN_ACCESS_TOKEN;
+  const calls = [];
+  const server = createServer((request, response) => {
+    calls.push({ path: request.url, authorization: request.headers.authorization });
+    response.setHeader("content-type", "application/json");
+    response.end(JSON.stringify({ ok: true }));
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  try {
+    process.env.HEYGEN_API_URL = `http://127.0.0.1:${server.address().port}///`;
+    process.env.HEYGEN_ACCESS_TOKEN = "fixture-token";
+    const origin = new URL(process.env.HEYGEN_API_URL).origin;
+    globalThis.fetch = (url, options) => {
+      assert.equal(new URL(url).origin, origin, "this test must never reach the internet");
+      return originalFetch(url, options);
+    };
+    for (const file of [
+      "./heygen.mjs?paired-host",
+      "../../../../../packages/cli/src/audio/scripts/lib/heygen.mjs?paired-host",
+    ]) {
+      const helper = await import(new URL(file, import.meta.url));
+      assert.deepEqual(
+        await helper.heygenJSON("/voices", { headers: helper.heygenAuthHeaders() }),
+        {
+          ok: true,
+        },
+      );
+    }
+    assert.deepEqual(calls, [
+      { path: "/v3/voices", authorization: "Bearer fixture-token" },
+      { path: "/v3/voices", authorization: "Bearer fixture-token" },
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (previousHost === undefined) delete process.env.HEYGEN_API_URL;
+    else process.env.HEYGEN_API_URL = previousHost;
+    if (previousToken === undefined) delete process.env.HEYGEN_ACCESS_TOKEN;
+    else process.env.HEYGEN_ACCESS_TOKEN = previousToken;
+    await new Promise((resolve) => server.close(resolve));
+  }
 });

@@ -4,7 +4,8 @@
  * Priority — first non-empty wins:
  *   1. `HEYGEN_API_KEY` env (matches heygen-cli)
  *   2. `HYPERFRAMES_API_KEY` env (alias for parity with other tools)
- *   3. `~/.heygen/credentials` (JSON) — unexpired OAuth, else api_key
+ *   3. `HEYGEN_ACCESS_TOKEN` env (host-managed OAuth)
+ *   4. `~/.heygen/credentials` (JSON) — unexpired OAuth, else api_key
  *
  * Absent sources fall through. A broken file (parse error, bad shape)
  * surfaces immediately as `ErrInvalidStore` — silently falling back
@@ -19,7 +20,7 @@
 import { isHeaderSafe, readStore } from "./store.js";
 import { ErrInvalidStore, ErrLoginExpired, ErrNotConfigured, isAuthError } from "./errors.js";
 
-type CredentialSource = "env" | "env_alias" | "file_json" | "file_legacy";
+type CredentialSource = "env" | "env_alias" | "env_oauth" | "file_json" | "file_legacy";
 
 interface ApiKeyCredential {
   type: "api_key";
@@ -63,6 +64,14 @@ export async function resolveCredential(opts: ResolveOptions = {}): Promise<Reso
       throw ErrInvalidStore("HYPERFRAMES_API_KEY contains control characters");
     }
     return { type: "api_key", key: hfEnv, source: "env_alias" };
+  }
+
+  const accessToken = process.env["HEYGEN_ACCESS_TOKEN"];
+  if (accessToken) {
+    if (!isHeaderSafe(accessToken)) {
+      throw ErrInvalidStore("HEYGEN_ACCESS_TOKEN contains control characters");
+    }
+    return { type: "oauth", access_token: accessToken, source: "env_oauth", refreshable: false };
   }
 
   const { credentials, source } = await readStore();

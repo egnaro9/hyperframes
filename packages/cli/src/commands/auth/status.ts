@@ -260,6 +260,7 @@ function identityRows(user: UserInfo): [string, string][] {
 const SOURCE_LABELS: Record<ResolvedCredential["source"], string> = {
   env: "env (HEYGEN_API_KEY)",
   env_alias: "env (HYPERFRAMES_API_KEY)",
+  env_oauth: "env (HEYGEN_ACCESS_TOKEN)",
   file_legacy: "file (~/.heygen/credentials — legacy plaintext)",
   file_json: "file (~/.heygen/credentials)",
 };
