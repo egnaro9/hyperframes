@@ -226,20 +226,15 @@ describe("rename references", () => {
     ).toBe('url(x/b.png) srcset="x/b.png 2x"');
   });
 
-  it("keeps a root-relative lead, and reads JSON-escaped and Windows separators", () => {
-    const text = [
-      '<img src="/assets/a.png">',
-      "url(/assets/a.png)",
-      '{"src":"assets\\/a.png"}',
-      '{"path":"assets\\\\a.png"}',
-    ].join("\n");
+  it("keeps a root-relative lead and interprets JSON separators in their consumer grammar", () => {
+    const slash = '{"src":"assets\\/a.png"}';
+    const backslash = '{"path":"assets\\\\a.png"}';
+    expect(JSON.parse(slash).src).toBe("assets/a.png");
+    expect(JSON.parse(backslash).path).toBe("assets\\a.png");
+    const text = `<img src="/assets/a.png">\n<script>${slash}</script>\n<script>${backslash}</script>`;
+    const backslashAfter = process.platform === "win32" ? '{"path":"brand\\\\a.png"}' : backslash;
     expect(rewrite(text, "assets", "brand", true)).toBe(
-      [
-        '<img src="/brand/a.png">',
-        "url(/brand/a.png)",
-        '{"src":"brand\\/a.png"}',
-        '{"path":"brand\\\\a.png"}',
-      ].join("\n"),
+      `<img src="/brand/a.png">\n<script>{"src":"brand\\/a.png"}</script>\n<script>${backslashAfter}</script>`,
     );
   });
 
@@ -279,11 +274,18 @@ describe("rename references", () => {
     ).toBe(escaped);
   });
 
-  it("compares escaped spellings by their text, not by offsets", () => {
-    const text = String.raw`"dir\/other a.png&backup.png" "dir\\other a.png&backup.png"`;
-    expect(referenceRewriter("a.png", "b.png", false, ["dir/other a.png&backup.png"])(text)).toBe(
-      text,
-    );
+  it("compares escaped script spellings against both distinct physical path identities", () => {
+    const slash = String.raw`"dir\/other a.png&backup.png"`;
+    const backslash = String.raw`"dir\\other a.png&backup.png"`;
+    expect(JSON.parse(slash)).toBe("dir/other a.png&backup.png");
+    expect(JSON.parse(backslash)).toBe("dir\\other a.png&backup.png");
+    const text = `${slash} ${backslash}`;
+    expect(
+      referenceRewriter("a.png", "b.png", false, [
+        "dir/other a.png&backup.png",
+        "dir\\other a.png&backup.png",
+      ])(text, "script"),
+    ).toBe(text);
   });
 
   it("stays fast with thousands of existing paths and references", () => {
@@ -419,7 +421,40 @@ describe("renaming a folder over the route", () => {
     expect(JSON.parse(readFileSync(join(project, "script.js"), "utf8"))).toBe("assets/final.png");
   });
 
+  it("does not retarget a distinct literal-backslash file when renaming a slash path", async () => {
+    const distinctName = process.platform === "win32" ? "assets-a.png" : "assets\\a.png";
+    const project = mkdtempSync(join(tmpdir(), "hf-rename-separator-identity-"));
+    dirs.push(project);
+    mkdirSync(join(project, "assets"));
+    writeFileSync(join(project, "assets/a.png"), "asset A");
+    writeFileSync(join(project, distinctName), "asset B");
+    const config = JSON.stringify({ path: distinctName });
+    writeFileSync(join(project, "config.json"), config);
+    writeFileSync(join(project, "script.js"), JSON.stringify(distinctName));
+    writeFileSync(join(project, "index.html"), '<img src="assets/a.png">');
+    const response = await fileRoutesFor(project).request("/projects/p/files/assets/a.png", {
+      method: "PATCH",
+      body: JSON.stringify({ newPath: "assets/b.png" }),
+    });
+    expect(response.status).toBe(200);
+    expect(readFileSync(join(project, "config.json"), "utf8")).toBe(config);
+    expect(readFileSync(join(project, "script.js"), "utf8")).toBe(JSON.stringify(distinctName));
+    expect(readFileSync(join(project, "index.html"), "utf8")).toBe('<img src="assets/b.png">');
+    expect(readFileSync(join(project, "assets/b.png"), "utf8")).toBe("asset A");
+    expect(readFileSync(join(project, distinctName), "utf8")).toBe("asset B");
+    const folderResponse = await fileRoutesFor(project).request("/projects/p/files/assets", {
+      method: "PATCH",
+      body: JSON.stringify({ newPath: "brand" }),
+    });
+    expect(folderResponse.status).toBe(200);
+    expect(readFileSync(join(project, "config.json"), "utf8")).toBe(config);
+    expect(readFileSync(join(project, "index.html"), "utf8")).toBe('<img src="brand/b.png">');
+    expect(readFileSync(join(project, "brand/b.png"), "utf8")).toBe("asset A");
+    expect(readFileSync(join(project, distinctName), "utf8")).toBe("asset B");
+  });
+
   it("renames a literal backslash filename twice through the route", async () => {
+    const intermediate = process.platform === "win32" ? "x/y.png" : "x\\y.png";
     const project = mkdtempSync(join(tmpdir(), "hf-rename-backslash-"));
     dirs.push(project);
     writeFileSync(join(project, "old.png"), "image witness");
@@ -427,8 +462,8 @@ describe("renaming a folder over the route", () => {
     writeFileSync(join(project, "config.json"), '{"path":"old.png"}');
     const app = fileRoutesFor(project);
     for (const [from, to] of [
-      ["old.png", "x\\y.png"],
-      ["x\\y.png", "final.png"],
+      ["old.png", intermediate],
+      [intermediate, "final.png"],
     ]) {
       const response = await app.request(`/projects/p/files/${encodeURIComponent(from!)}`, {
         method: "PATCH",

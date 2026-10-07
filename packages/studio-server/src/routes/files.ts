@@ -26,7 +26,7 @@ import {
   realpathSync,
   type Dirent,
 } from "node:fs";
-import { resolve, dirname, join } from "node:path";
+import { resolve, dirname, join, sep } from "node:path";
 import type { StudioApiAdapter } from "../types.js";
 import { isAudioFile } from "../helpers/mime.js";
 import { lengthIsTimeline } from "../helpers/compositionInputs.js";
@@ -861,6 +861,7 @@ export function referenceRewriter(
   isDirectory: boolean,
   existing: readonly string[] = [],
 ): (text: string, syntax?: ReferenceSyntax) => string {
+  const oldIdentity = sep === "\\" ? oldPath.replace(/\\/g, "/") : oldPath;
   const pattern = referencePattern(oldPath, isDirectory);
   const around = new Map<string, Map<number, Set<string>>>();
   const afterLengths = new Set<number>();
@@ -883,8 +884,11 @@ export function referenceRewriter(
       value = decodeAuthoredAttribute(value);
     }
     value = decodeQuotedReference(value, context.syntax);
-    if (context.url) value = full ? decodedUrlPath(value) : decodeWellFormedEscapes(value);
-    return oldPath.includes("\\") ? value : value.replace(/\\{0,2}[\\/]/g, "/");
+    if (context.url) {
+      value = value.replace(/\\/g, "/");
+      value = full ? decodedUrlPath(value) : decodeWellFormedEscapes(value);
+    }
+    return sep === "\\" ? value.replace(/\\/g, "/") : value;
   };
   return function rewriteText(text, syntax = "html", normalizeEntities = true) {
     if (syntax === "html" && normalizeEntities) {
@@ -981,7 +985,15 @@ export function referenceRewriter(
       };
       if (url && offset !== urlRegion!.start) return match;
       const reference = match.slice(lead.length);
-      if (normalized(reference, context, true) !== oldPath) return match;
+      if (normalized(reference, context, true) !== oldIdentity) return match;
+      if (
+        isDirectory &&
+        !normalized(
+          text.slice(offset + match.length, offset + match.length + 4),
+          context,
+        ).startsWith("/")
+      )
+        return match;
       const at = offset + lead.length;
       const head = normalized(text.slice(Math.max(0, at - window), at), context);
       const tail = normalized(
