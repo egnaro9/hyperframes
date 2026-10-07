@@ -748,6 +748,16 @@ function escapeQuotedReference(path: string, quote: string): string {
     : escaped.replace(new RegExp(escapeRegExp(quote), "g"), `\\${quote}`);
 }
 
+function escapeRawUrlPath(path: string): string {
+  const encodeSpaces = path.startsWith(" ") || path.endsWith(" ");
+  return path.replace(/[\s\S]/g, (char) => {
+    if (char.charCodeAt(0) < 0x20 || ":?%#\\".includes(char) || (encodeSpaces && char === " ")) {
+      return encodeUrlPath(char);
+    }
+    return char;
+  });
+}
+
 function spellLike(
   reference: string,
   path: string,
@@ -759,7 +769,7 @@ function spellLike(
     return encodeUrlPath(path);
   switch (syntax) {
     case "html": {
-      const escaped = escapeHtmlReference(url ? path.replace(/[?%#]/g, encodeUrlPath) : path);
+      const escaped = escapeHtmlReference(url ? escapeRawUrlPath(path) : path);
       return ["'", '"'].includes(quote)
         ? escaped
         : escaped.replace(/[\t\n\f\r =<>`]/g, (char) => `&#${char.codePointAt(0)!};`);

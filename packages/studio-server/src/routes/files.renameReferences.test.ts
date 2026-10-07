@@ -19,6 +19,14 @@ function fileRoutesFor(project: string): Hono {
 }
 
 describe("rename references", () => {
+  it.each([
+    ["data:logo.png", "data%3Alogo.png"],
+    ["x\\y.png", "x%5Cy.png"],
+    [" a\t\n\r .png ", "%20a%09%0A%0D%20.png%20"],
+  ])("keeps the renamed physical file %j representable in a raw HTML URL", (filename, url) => {
+    expect(rewrite('<img src="old.png">', "old.png", filename, false)).toBe(`<img src="${url}">`);
+  });
+
   it("does not classify active URL fields through script-looking comments", () => {
     expect(
       rewrite(`<!-- <script> --><img src="a.png"><!-- </script> -->`, "a.png", "a?#.png", false),
@@ -409,6 +417,27 @@ describe("renaming a folder over the route", () => {
     };
     expect(readFileSync(join(project, finalConfig.path), "utf8")).toBe("original asset");
     expect(JSON.parse(readFileSync(join(project, "script.js"), "utf8"))).toBe("assets/final.png");
+  });
+
+  it("keeps a renamed scheme-looking physical filename reachable by the bundler", async () => {
+    const project = mkdtempSync(join(tmpdir(), "hf-rename-local-scheme-"));
+    dirs.push(project);
+    writeFileSync(join(project, "a.png"), "image witness");
+    writeFileSync(
+      join(project, "index.html"),
+      '<html><body><main data-composition-id="root" data-width="320" data-height="180"><img src="a.png"></main></body></html>',
+    );
+    const response = await fileRoutesFor(project).request("/projects/p/files/a.png", {
+      method: "PATCH",
+      body: JSON.stringify({ newPath: "data:logo.png" }),
+    });
+    expect(response.status).toBe(200);
+    expect(readFileSync(join(project, "data:logo.png"), "utf8")).toBe("image witness");
+    expect(readFileSync(join(project, "index.html"), "utf8")).toContain('src="data%3Alogo.png"');
+    const { bundleToSingleHtml } = await import("@hyperframes/core/compiler");
+    expect(await bundleToSingleHtml(project)).toContain(
+      "data:image/png;base64,aW1hZ2Ugd2l0bmVzcw==",
+    );
   });
 
   it("renames URL fields to literal URL punctuation without changing raw file values", async () => {

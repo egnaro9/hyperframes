@@ -188,7 +188,7 @@ function compileTag(
       if (start != null) {
         result = injectAttr(result, "data-end", String(start + duration));
       }
-    } else if (id) {
+    } else {
       // No data-duration: mark as unresolved so caller can provide it
       unresolved = {
         id,

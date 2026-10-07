@@ -19,46 +19,44 @@ export interface HtmlOpeningTagSpan {
   attributes: HtmlAttributeSpan[];
 }
 
+function readAttributeValue(html: string, at: number) {
+  while (/[\t\n\f\r ]/.test(html[at] ?? "")) at++;
+  const quote = html[at] === '"' || html[at] === "'" ? html[at]! : "";
+  if (quote) at++;
+  const valueStart = at;
+  if (quote) {
+    while (at < html.length && html[at] !== quote) at++;
+  } else {
+    while (at < html.length && !/[\t\n\f\r >]/.test(html[at]!)) at++;
+  }
+  const valueEnd = at;
+  if (quote && html[at] === quote) at++;
+  return { value: html.slice(valueStart, valueEnd), valueStart, valueEnd, quote, end: at };
+}
+
+function readAttribute(html: string, start: number): HtmlAttributeSpan | null {
+  let at = start;
+  while (at < html.length && !/[\t\n\f\r =/>]/.test(html[at]!)) at++;
+  if (at === start) return null;
+  const name = html.slice(start, at).toLowerCase();
+  const nameEnd = at;
+  while (/[\t\n\f\r ]/.test(html[at] ?? "")) at++;
+  if (html[at] !== "=") return { kind: "boolean", name, start, end: nameEnd };
+  return { kind: "value", name, start, ...readAttributeValue(html, at + 1) };
+}
+
 function readOpeningTag(html: string, start: number, name: string, at: number): HtmlOpeningTagSpan {
   const attributes: HtmlAttributeSpan[] = [];
   while (at < html.length) {
     while (/[\t\n\f\r /]/.test(html[at] ?? "")) at++;
     if (at >= html.length || html[at] === ">") break;
-    const attrStart = at;
-    while (at < html.length && !/[\t\n\f\r =/>]/.test(html[at]!)) at++;
-    if (at === attrStart) {
+    const attribute = readAttribute(html, at);
+    if (attribute === null) {
       at++;
       continue;
     }
-    const attrName = html.slice(attrStart, at).toLowerCase();
-    const nameEnd = at;
-    while (/[\t\n\f\r ]/.test(html[at] ?? "")) at++;
-    if (html[at] !== "=") {
-      attributes.push({ kind: "boolean", name: attrName, start: attrStart, end: nameEnd });
-      continue;
-    }
-    at++;
-    while (/[\t\n\f\r ]/.test(html[at] ?? "")) at++;
-    const quote = html[at] === '"' || html[at] === "'" ? html[at]! : "";
-    if (quote) at++;
-    const valueStart = at;
-    if (quote) {
-      while (at < html.length && html[at] !== quote) at++;
-    } else {
-      while (at < html.length && !/[\t\n\f\r >]/.test(html[at]!)) at++;
-    }
-    const valueEnd = at;
-    if (quote && html[at] === quote) at++;
-    attributes.push({
-      kind: "value",
-      name: attrName,
-      start: attrStart,
-      end: at,
-      valueStart,
-      valueEnd,
-      value: html.slice(valueStart, valueEnd),
-      quote,
-    });
+    attributes.push(attribute);
+    at = attribute.end;
   }
   const closed = html[at] === ">";
   return {
