@@ -83,10 +83,10 @@ function firstAuthorError(errors: unknown): string | null {
 export class CompositionProbe {
   private _interval: ReturnType<typeof setInterval> | null = null;
   private _runtimeInjected = false;
-  private _failed = false;
+  private _failure: { document: Document | null } | null = null;
 
   get failed(): boolean {
-    return this._failed;
+    return this._failure !== null && this._failure.document === this._iframe.contentDocument;
   }
 
   constructor(
@@ -102,6 +102,7 @@ export class CompositionProbe {
   /** Start or restart the probe, stopping the active interval first. */
   start(): void {
     this.stop();
+    this._failure = null;
     this._runtimeInjected = false;
     let attempts = 0;
 
@@ -121,14 +122,14 @@ export class CompositionProbe {
       if (outcome) {
         this.stop();
         if (outcome.kind === "error") {
-          this._failed = true;
+          this._failure = { document: this._iframe.contentDocument };
           this._callbacks.onError(outcome.message);
         } else this._callbacks.onReady(outcome.result);
         return;
       }
       if (attempts >= 40) {
         this.stop();
-        this._failed = true;
+        this._failure = { document: this._iframe.contentDocument };
         this._callbacks.onError("Composition timeline not found after 8s");
       }
     }, 200);
@@ -178,7 +179,7 @@ export class CompositionProbe {
   }
 
   stop(): void {
-    this._failed = false;
+    if (!this.failed) this._failure = null;
     if (this._interval !== null) {
       clearInterval(this._interval);
       this._interval = null;

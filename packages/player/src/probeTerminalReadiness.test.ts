@@ -46,10 +46,51 @@ describe("terminal probe readiness", () => {
     expect(player.duration).toBe(0);
   });
 
-  it("accepts a new source handshake after the old source timed out", () => {
+  it("rejects the failed document while its replacement is still navigating", () => {
     const { player, iframe, onReady } = mountPlayer();
     vi.advanceTimersByTime(8000);
+    const failedDocument = iframe.contentDocument;
+    Object.defineProperty(iframe, "contentDocument", {
+      configurable: true,
+      get: () => failedDocument,
+    });
     player.setAttribute("src", "next.html");
+    sendTimeline(iframe);
+    expect(onReady).not.toHaveBeenCalled();
+    expect(player.ready).toBe(false);
+    expect(player.duration).toBe(0);
+  });
+
+  it("accepts the replacement document handshake before its load event", () => {
+    const { player, iframe, onReady } = mountPlayer();
+    vi.advanceTimersByTime(8000);
+    const failedDocument = iframe.contentDocument;
+    Object.defineProperty(iframe, "contentDocument", {
+      configurable: true,
+      get: () => failedDocument,
+    });
+    player.setAttribute("src", "next.html");
+    const replacement = document.implementation.createHTMLDocument("Replacement");
+    Object.defineProperty(iframe, "contentDocument", {
+      configurable: true,
+      get: () => replacement,
+    });
+    sendTimeline(iframe);
+    expect(onReady).toHaveBeenCalledOnce();
+    expect(player.ready).toBe(true);
+    expect(player.duration).toBe(9);
+  });
+
+  it("keeps an opaque document failure latched until its next load event", () => {
+    const { player, iframe, onError, onReady } = mountPlayer();
+    Object.defineProperty(iframe, "contentDocument", { configurable: true, get: () => null });
+    vi.advanceTimersByTime(8000);
+    expect(onError).toHaveBeenCalledOnce();
+    player.setAttribute("src", "https://example.org/next.html");
+    sendTimeline(iframe);
+    expect(onReady).not.toHaveBeenCalled();
+    expect(player.ready).toBe(false);
+    iframe.dispatchEvent(new Event("load"));
     sendTimeline(iframe);
     expect(onReady).toHaveBeenCalledOnce();
     expect(player.ready).toBe(true);
