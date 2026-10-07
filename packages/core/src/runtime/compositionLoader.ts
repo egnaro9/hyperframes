@@ -242,9 +242,9 @@ function prepareFlattenedInnerRoot(innerRoot: HTMLElement): HTMLElement {
   return prepared;
 }
 
-function resolveScriptSourceUrl(scriptSrc: string, compositionUrl: URL | null): string {
-  const trimmedSrc = scriptSrc.trim();
-  if (!trimmedSrc) return scriptSrc;
+function resolvePayloadSourceUrl(source: string, compositionUrl: URL | null): string {
+  const trimmedSrc = source.trim();
+  if (!trimmedSrc) return source;
   try {
     if (
       BARE_RELATIVE_PATH_RE.test(trimmedSrc) &&
@@ -259,7 +259,7 @@ function resolveScriptSourceUrl(scriptSrc: string, compositionUrl: URL | null): 
     }
     return new URL(trimmedSrc, document.baseURI).toString();
   } catch {
-    return scriptSrc;
+    return source;
   }
 }
 
@@ -533,7 +533,7 @@ async function mountCompositionContent(params: {
     const type = script.getAttribute("type")?.trim() ?? "";
     const src = script.getAttribute("src")?.trim() ?? "";
     if (src) {
-      const resolvedSrc = resolveScriptSourceUrl(src, params.compositionUrl);
+      const resolvedSrc = resolvePayloadSourceUrl(src, params.compositionUrl);
       // A sub-comp that <script src>s itself would re-enter the mount; skip it.
       if (params.compositionUrl && isSameDocumentUrl(resolvedSrc, params.compositionUrl)) {
         return null;
@@ -616,7 +616,7 @@ async function mountCompositionContent(params: {
           injectedScript.src = scriptPayload.src;
         } else if (scriptPayload.type.toLowerCase() === "importmap") {
           const map = parseImportMap(scriptPayload.content, (url) =>
-            resolveScriptSourceUrl(url, params.compositionUrl),
+            resolvePayloadSourceUrl(url, params.compositionUrl),
           );
           injectedScript.textContent = map ? JSON.stringify(map) : scriptPayload.content;
         } else if (scriptPayload.type.toLowerCase() === "module") {
@@ -739,7 +739,7 @@ async function mountExternalCompositions(
         const ancestry = (parent && attemptedPaths.get(parent)) || [];
         let compositionUrl: URL | null = null;
         try {
-          compositionUrl = new URL(src, ancestry.at(-1) ?? document.baseURI);
+          compositionUrl = new URL(resolvePayloadSourceUrl(src, null));
         } catch {
           compositionUrl = null;
         }

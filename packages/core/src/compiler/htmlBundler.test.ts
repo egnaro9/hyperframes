@@ -10,6 +10,7 @@ import { resetUnknownEnumWarnings } from "../runtime/getVariables";
 import { sanitizeCssValue } from "../runtime/applyVariableBindings";
 import { getHyperframeRuntimeScript } from "../generated/runtime-inline";
 import { ensureHfIds } from "../parsers/hfIds";
+import { nestedCompositionPathFixture } from "./nestedCompositionPath.testFixture";
 import { AFTER_FONTS_SCRIPT_TYPE, AFTER_FONTS_SCRIPTS } from "./scriptRuns";
 
 function makeTempProject(files: Record<string, string>): string {
@@ -81,6 +82,16 @@ function makeSymlinkProject(
 }
 
 describe("bundleToSingleHtml", () => {
+  it("matches runtime root-relative child paths from a nested composition directory", async () => {
+    const dir = makeTempProject(nestedCompositionPathFixture);
+    try {
+      const { document } = parseHTML(await bundleToSingleHtml(dir));
+      expect(document.querySelector("[data-proof]")?.textContent).toBe("Project-root card");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it.each(["file", "template"])(
     "keeps %s mount ownership in compiled output only",
     async (kind) => {

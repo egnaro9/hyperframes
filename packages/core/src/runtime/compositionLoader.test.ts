@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, afterEach, beforeAll } from "vitest";
+import { nestedCompositionPathFixture } from "../compiler/nestedCompositionPath.testFixture";
 import { loadCompositions } from "./compositionLoader";
 import { applyVariableBindings } from "./applyVariableBindings";
 
@@ -48,10 +49,13 @@ beforeAll(() => {
 
 describe("loadCompositions external hosts", () => {
   it("loads external children in one pass without fetching their parent again", async () => {
+    const base = document.createElement("base");
+    base.href = "https://example.com/";
+    document.head.appendChild(base);
     const host = appendExternalHost("https://example.com/scenes/outer.html", "outer");
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const html = String(input).endsWith("outer.html")
-        ? '<html><body><div data-composition-id="outer"><div data-composition-id="inner" data-composition-src="inner.html"></div></div></body></html>'
+        ? '<html><body><div data-composition-id="outer"><div data-composition-id="inner" data-composition-src="scenes/inner.html"></div></div></body></html>'
         : '<html><body><div data-composition-id="inner"><p>Inner content</p></div></body></html>';
       return new Response(html, { status: 200 });
     });
@@ -61,6 +65,27 @@ describe("loadCompositions external hosts", () => {
       "https://example.com/scenes/outer.html",
       "https://example.com/scenes/inner.html",
     ]);
+  });
+
+  it("matches bundled root-relative child paths from a nested composition directory", async () => {
+    const files = nestedCompositionPathFixture;
+    const base = document.createElement("base");
+    base.href = "https://example.com/project/";
+    document.head.appendChild(base);
+    document.body.innerHTML = files["index.html"]!;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const relative = new URL(String(input)).pathname.slice("/project/".length);
+      const content = files[relative];
+      return new Response(content ?? "Not found", { status: content === undefined ? 404 : 200 });
+    });
+    const onDiagnostic = vi.fn();
+    await loadFixture({ onDiagnostic });
+    expect(document.querySelector("[data-proof]")?.textContent).toBe("Project-root card");
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      "https://example.com/project/compositions/scene.html",
+      "https://example.com/project/compositions/cards/card.html",
+    ]);
+    expect(onDiagnostic).not.toHaveBeenCalled();
   });
 
   it("loads external children introduced by a template mount", async () => {
@@ -98,6 +123,9 @@ describe("loadCompositions external hosts", () => {
   });
 
   it("refuses a circular nested external reference without fetching it again", async () => {
+    const base = document.createElement("base");
+    base.href = "https://example.com/";
+    document.head.appendChild(base);
     const host = appendExternalHost("https://example.com/loop.html", "loop");
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
@@ -159,7 +187,7 @@ describe("loadCompositions external hosts", () => {
 
   afterEach(() => {
     document.body.innerHTML = "";
-    document.head.querySelectorAll("style, link").forEach((node) => node.remove());
+    document.head.querySelectorAll("style, link, base").forEach((node) => node.remove());
     delete (window as Window & { gsap?: unknown; __selectedTitle?: unknown }).gsap;
     delete (window as Window & { gsap?: unknown; __selectedTitle?: unknown }).__selectedTitle;
     delete (window as Window & { __hyperframes?: unknown }).__hyperframes;
