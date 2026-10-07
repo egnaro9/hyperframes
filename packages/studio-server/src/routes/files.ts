@@ -39,6 +39,7 @@ import {
 } from "../helpers/safePath.js";
 import { backupPathForResponse, snapshotBeforeWrite } from "../helpers/backupJournal.js";
 import { projectDirMissing } from "../helpers/projectDirMissing.js";
+import { decodeWellFormedEscapes } from "../helpers/requestSubPath.js";
 import {
   createWriteToken,
   fileContentVersion,
@@ -706,7 +707,12 @@ const ENTITY_SPELLINGS: Record<string, readonly string[]> = {
   "'": ["&#39;", "&apos;"],
   '"': ["&quot;"],
 };
-const ENTITY_REFERENCE_PATTERN = new RegExp(Object.values(ENTITY_SPELLINGS).flat().join("|"));
+const ENTITY_CHARACTERS = new Map(
+  Object.entries(ENTITY_SPELLINGS).flatMap(([char, spellings]) =>
+    spellings.map((spelling) => [spelling, char] as const),
+  ),
+);
+const ENTITY_REFERENCE_PATTERN = new RegExp([...ENTITY_CHARACTERS.keys()].join("|"));
 
 function encodeFileReference(path: string): string {
   return encodeURIComponent(path).replace(/%2F/g, "/").replace(/'/g, "%27");
@@ -722,10 +728,12 @@ function referenceSpellings(char: string): string {
 }
 
 function spellLike(reference: string, path: string): string {
-  const encoded = /%[0-9A-Fa-f]{2}/.test(reference) ? encodeFileReference(path) : path;
-  return ENTITY_REFERENCE_PATTERN.test(reference)
-    ? encoded.replace(/[&"']/g, (char) => ENTITY_SPELLINGS[char]![0]!)
-    : encoded;
+  if (!ENTITY_REFERENCE_PATTERN.test(reference) || /%[0-9A-Fa-f]{2}/.test(reference)) {
+    return encodeFileReference(path);
+  }
+  return path
+    .replace(/[?%#]/g, encodeFileReference)
+    .replace(/[&"']/g, (char) => ENTITY_SPELLINGS[char]![0]!);
 }
 
 function referencePattern(oldPath: string, isDirectory: boolean): RegExp {
@@ -761,10 +769,16 @@ export function referenceRewriter(
         before,
       );
       afterLengths.add(after.length);
-      window = Math.max(window, path.length * 3);
+      window = Math.max(window, path.length * 6);
     }
   }
-  const normalized = (text: string) => text.replace(/\\{0,2}[\\/]/g, "/");
+  const normalized = (text: string) =>
+    decodeWellFormedEscapes(
+      text.replace(
+        new RegExp(ENTITY_REFERENCE_PATTERN.source, "g"),
+        (entity) => ENTITY_CHARACTERS.get(entity)!,
+      ),
+    ).replace(/\\{0,2}[\\/]/g, "/");
   return (text) =>
     text.replace(pattern, (...args) => {
       const [match, offset] = [args[0] as string, args.at(-3) as number];

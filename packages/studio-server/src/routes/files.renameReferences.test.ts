@@ -19,6 +19,32 @@ function fileRoutesFor(project: string): Hono {
 }
 
 describe("rename references", () => {
+  it("keeps URL delimiters and literal percent signs escaped in an entity-spelled reference", () => {
+    expect(
+      rewrite('<img src="assets/a&amp;b.png">', "assets/a&b.png", "assets/c?%20#.png", false),
+    ).toBe('<img src="assets/c%3F%2520%23.png">');
+  });
+
+  it("leaves encoded longer existing names alone on either side of a match", () => {
+    const text =
+      '<img src="assets/my%20clip.png&amp;backup.png"><img src="other%20assets/my%20clip.png"><img src="assets/my%20clip.png">';
+    expect(
+      referenceRewriter("assets/my clip.png", "assets/new clip.png", false, [
+        "assets/my clip.png&backup.png",
+        "other assets/my clip.png",
+        "assets/my clip.png",
+      ])(text),
+    ).toBe(
+      '<img src="assets/my%20clip.png&amp;backup.png"><img src="other%20assets/my%20clip.png"><img src="assets/new%20clip.png">',
+    );
+  });
+
+  it("escapes a newly introduced quote even when the old reference used no escapes", () => {
+    expect(rewrite('<img src="assets/a.png">', "assets/a.png", 'assets/say "hi".png', false)).toBe(
+      '<img src="assets/say%20%22hi%22.png">',
+    );
+  });
+
   it("keeps URL delimiters and quotes encoded when renaming a percent-spelled reference", () => {
     expect(
       rewrite("<img src='assets/my%20clip.png'>", "assets/my clip.png", "assets/it's?#.png", false),
