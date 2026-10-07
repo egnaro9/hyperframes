@@ -91,7 +91,7 @@ export function getMediaTreatmentCapabilityDetail(id: string): unknown {
       initial: `style="${property.name}: <start>"`,
       tween: `timeline.to("<selector>", { "${property.name}": <end>, duration: <seconds> })`,
       rules: [
-        "Author the initial value inline on the media element.",
+        "Once set (inline, in a stylesheet or on a parent), the property overrides the payload's value for this control: set it only on media you animate, starting at the tween's first value.",
         "Use finite keyframes on a paused timeline registered in window.__timelines.",
         "Do not use a frame-zero set, timers, random values, or onUpdate callbacks.",
       ],

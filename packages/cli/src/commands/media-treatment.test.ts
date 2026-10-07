@@ -116,6 +116,12 @@ describe("applyMediaTreatmentToHtml", () => {
     });
   });
 
+  it("warns that an animated property overrides the payload, instead of asking for an inline start", () => {
+    const rules = getMediaTreatmentCapabilityDetail("blur")?.animation?.rules ?? [];
+    expect(rules.join(" ")).toContain("overrides the payload's value");
+    expect(rules.some((rule) => rule.startsWith("Author the initial value inline"))).toBe(false);
+  });
+
   it("rejects unknown capability lookups", () => {
     expect(() => getMediaTreatmentCapabilityDetail("make-it-cinematic")).toThrow(
       /Unknown media-treatment capability/,
