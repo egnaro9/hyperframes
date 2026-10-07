@@ -221,6 +221,18 @@ it("never streams a segment that starts before what was already streamed", async
   expect(words.map((event) => event.words.map((word) => word.text))).toEqual([["later"]]);
 });
 
+it("streams a zero-length first segment once, however often whisper reprints it", async () => {
+  native.printed.stdout =
+    "[00:00:00.000 --> 00:00:00.000]   uh\n" +
+    "[00:00:00.000 --> 00:00:00.000]   uh\n" +
+    "[00:00:00.000 --> 00:00:02.000]   Hello world\n";
+  const { words } = await transcribeStreaming();
+  expect(words.map((event) => event.words.map((word) => word.text))).toEqual([
+    ["uh"],
+    ["Hello", "world"],
+  ]);
+});
+
 it("reports progress through audio where whisper prints no segment, once per step", async () => {
   writeFileSync(join(dir, "audio.wav"), Buffer.alloc(4 * 32_000));
   native.printed.stderr =

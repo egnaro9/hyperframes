@@ -540,7 +540,7 @@ export async function transcribe(
     overrideMs: options?.timeoutMs,
   });
   let through = 0;
-  let streamedUntil = 0;
+  let streamedUntil = -1;
   const heard = (words: Word[], at: number) => {
     if (!onEvent || (words.length === 0 && at <= through)) return;
     through = Math.max(through, at);
@@ -555,7 +555,7 @@ export async function transcribe(
         ((line) => {
           const segment = segmentWords(line);
           // With word timing on, whisper.cpp reprints its first window's segments out of order.
-          if (!segment || segment.start < streamedUntil) return;
+          if (!segment || segment.start < streamedUntil || segment.end <= streamedUntil) return;
           streamedUntil = segment.end;
           heard(segment.words, segment.end);
         }),
