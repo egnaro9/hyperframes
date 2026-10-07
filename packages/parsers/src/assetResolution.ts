@@ -52,29 +52,8 @@ export function isUnresolvedAssetPlaceholder(rawSrc: string): boolean {
 }
 
 /**
- * Every `data-composition-src` reference in one composition file's raw text, in
- * document order, deduped. The single owner of "which sub-compositions does
- * this file mount", so lint, telemetry, and any future scanner cannot drift
- * apart on the answer.
- *
- * Text-scanning rather than DOM-walking, and that is the load-bearing choice.
- * Every sub-composition except the render entry is authored inside a
- * `<template>` (the root index.html is forbidden from using that wrapper;
- * everything else prefers it). Template content is inert: it lives under
- * `template.content`, not the live document, so `document.querySelectorAll`
- * on a raw sub-composition file finds nothing and every nested reference
- * disappears. The renderer only gets away with a DOM scan because it recurses
- * on COMPILED html, where the wrapper is already gone.
- *
- * Callers must resolve each value against the PROJECT ROOT, never the
- * referencing file's directory: `data-composition-src` is root-relative at
- * every nesting level (see `parseSubCompositions` in htmlCompiler.ts).
- *
- * The scanner skips comments and raw text bodies so a
- * commented-out mount is not counted as a real one. Build-time placeholders and
- * remote or inline URLs are dropped: neither names a file on disk, and every
- * caller resolves what comes back against the project root.
- *
+ * Collect active, local composition paths in document order, including template content.
+ * Paths are physical file names relative to the project root at every nesting level.
  */
 export function collectSubCompositionSrcs(html: string): string[] {
   const srcs: string[] = [];

@@ -829,6 +829,29 @@ function referencePattern(oldPath: string, isDirectory: boolean): RegExp {
   );
 }
 
+function rewriteEntityAttributes(text: string, rewrite: (text: string) => string): string {
+  const parts: string[] = [];
+  let cursor = 0;
+  for (const tag of scanHtmlOpeningTags(text)) {
+    for (const attr of tag.attributes) {
+      if (attr.kind !== "value") continue;
+      const decoded = decodeAuthoredAttribute(attr.value);
+      if (decoded === attr.value) continue;
+      let value = escapeHtmlReference(decoded);
+      if (!attr.quote) value = value.replace(/[\t\n\f\r =<>`]/g, (char) => `&#${char.codePointAt(0)!};`);
+      const source = `<x ${attr.name}=${attr.quote}${value}${attr.quote}>`;
+      const updated = rewrite(source);
+      if (updated === source) continue;
+      const replacement = scanHtmlOpeningTags(updated)[0]!.attributes[0]!;
+      if (replacement.kind !== "value") throw new Error("Reference rewrite removed its attribute");
+      parts.push(text.slice(cursor, attr.valueStart), replacement.value);
+      cursor = attr.valueEnd;
+    }
+  }
+  parts.push(text.slice(cursor));
+  return parts.join("");
+}
+
 // A match inside the longer path of a file or folder that exists (`a.png&b.png`, `other assets/`) is that path's.
 // Existing paths are indexed by the text after the old path, then the text before it, so a match costs a few lookups.
 export function referenceRewriter(
@@ -860,9 +883,12 @@ export function referenceRewriter(
     }
     value = decodeQuotedReference(value, context.syntax);
     if (context.url) value = full ? decodedUrlPath(value) : decodeWellFormedEscapes(value);
-    return value.replace(/\\{0,2}[\\/]/g, "/");
+    return oldPath.includes("\\") ? value : value.replace(/\\{0,2}[\\/]/g, "/");
   };
-  return (text, syntax = "html") => {
+  return function rewriteText(text, syntax = "html", normalizeEntities = true) {
+    if (syntax === "html" && normalizeEntities) {
+      text = rewriteEntityAttributes(text, (source) => rewriteText(source, "html", false));
+    }
     pattern.lastIndex = 0;
     if (!pattern.test(text)) return text;
     pattern.lastIndex = 0;

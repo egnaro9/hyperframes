@@ -20,18 +20,19 @@ export interface HtmlOpeningTagSpan {
 }
 
 function readAttributeValue(html: string, at: number) {
-  while (/[\t\n\f\r ]/.test(html[at] ?? "")) at++;
-  const quote = html[at] === '"' || html[at] === "'" ? html[at]! : "";
+  while (/[\t\n\f\r ]/.test(html.charAt(at))) at++;
+  const quote = ['"', "'"].includes(html.charAt(at)) ? html.charAt(at) : "";
   if (quote) at++;
   const valueStart = at;
   if (quote) {
-    while (at < html.length && html[at] !== quote) at++;
+    const closing = html.indexOf(quote, at);
+    at = closing === -1 ? html.length : closing;
   } else {
     while (at < html.length && !/[\t\n\f\r >]/.test(html[at]!)) at++;
   }
   const valueEnd = at;
-  if (quote && html[at] === quote) at++;
-  return { value: html.slice(valueStart, valueEnd), valueStart, valueEnd, quote, end: at };
+  const end = quote ? Math.min(valueEnd + 1, html.length) : valueEnd;
+  return { value: html.slice(valueStart, valueEnd), valueStart, valueEnd, quote, end };
 }
 
 function readAttribute(html: string, start: number): HtmlAttributeSpan | null {

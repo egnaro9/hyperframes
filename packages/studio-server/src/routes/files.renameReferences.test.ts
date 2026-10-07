@@ -419,6 +419,37 @@ describe("renaming a folder over the route", () => {
     expect(JSON.parse(readFileSync(join(project, "script.js"), "utf8"))).toBe("assets/final.png");
   });
 
+  it("renames a literal backslash filename twice through the route", async () => {
+    const project = mkdtempSync(join(tmpdir(), "hf-rename-backslash-"));
+    dirs.push(project);
+    writeFileSync(join(project, "old.png"), "image witness");
+    writeFileSync(join(project, "index.html"), '<img src="old.png">');
+    writeFileSync(join(project, "config.json"), '{"path":"old.png"}');
+    const app = fileRoutesFor(project);
+    for (const [from, to] of [["old.png", "x\\y.png"], ["x\\y.png", "final.png"]]) {
+      const response = await app.request(`/projects/p/files/${encodeURIComponent(from!)}`, {
+        method: "PATCH", body: JSON.stringify({ newPath: to }),
+      });
+      expect(response.status).toBe(200);
+    }
+    expect(readFileSync(join(project, "index.html"), "utf8")).toBe('<img src="final.png">');
+    expect(JSON.parse(readFileSync(join(project, "config.json"), "utf8")).path).toBe("final.png");
+    expect(readFileSync(join(project, "final.png"), "utf8")).toBe("image witness");
+  });
+
+  it("renames references using the full native HTML entity vocabulary through the route", async () => {
+    const project = mkdtempSync(join(tmpdir(), "hf-rename-native-entities-"));
+    dirs.push(project);
+    writeFileSync(join(project, "a&≂̸b.png"), "image witness");
+    writeFileSync(join(project, "index.html"), '<img src="a&#38;&NotEqualTilde;b.png"><img src="a&#x26;&NotEqualTilde;b.png"><div style="background:url(a&#38;&NotEqualTilde;b.png)"></div>');
+    const response = await fileRoutesFor(project).request(`/projects/p/files/${encodeURIComponent("a&≂̸b.png")}`, {
+      method: "PATCH", body: JSON.stringify({ newPath: "new.png" }),
+    });
+    expect(response.status).toBe(200);
+    expect(readFileSync(join(project, "index.html"), "utf8")).toBe('<img src="new.png"><img src="new.png"><div style="background:url(new.png)"></div>');
+    expect(readFileSync(join(project, "new.png"), "utf8")).toBe("image witness");
+  });
+
   it("keeps a renamed scheme-looking physical filename reachable by the bundler", async () => {
     const project = mkdtempSync(join(tmpdir(), "hf-rename-local-scheme-"));
     dirs.push(project);

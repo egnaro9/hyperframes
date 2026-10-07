@@ -156,17 +156,11 @@ function replaceIdTags(html: string, id: string, replace: (tag: string) => strin
   return parts.join("");
 }
 
-function compileTag(
-  tag: string,
-  isVideo: boolean,
-  generateId: () => number,
-): { tag: string; unresolved: UnresolvedElement | null } {
+function withDefaultTimingAttrs(tag: string, tagName: string, generateId: () => number) {
   let result = tag;
-  let unresolved: UnresolvedElement | null = null;
-
   let id = getAttr(result, "id");
   if (!id) {
-    id = `${isVideo ? "hf-video" : "hf-audio"}-${generateId()}`;
+    id = `hf-${tagName}-${generateId()}`;
     result = injectAttr(result, "id", id);
   }
   let startStr = getAttr(result, "data-start");
@@ -175,7 +169,24 @@ function compileTag(
     result = injectAttr(result, "data-hf-auto-start", "");
     startStr = "0";
   }
-  const start = parseNumeric(startStr);
+  return { tag: result, id, start: parseNumeric(startStr) };
+}
+
+function withVideoAudioFlag(tag: string, isVideo: boolean): string {
+  if (!isVideo || hasAttr(tag, "data-has-audio")) return tag;
+  return injectAttr(tag, "data-has-audio", hasAttr(tag, "muted") ? "false" : "true");
+}
+
+function compileTag(
+  tag: string,
+  isVideo: boolean,
+  generateId: () => number,
+): { tag: string; unresolved: UnresolvedElement | null } {
+  const tagName = isVideo ? "video" : "audio";
+  const defaults = withDefaultTimingAttrs(tag, tagName, generateId);
+  let result = defaults.tag;
+  let unresolved: UnresolvedElement | null = null;
+  const { id, start } = defaults;
   const attrReader = tagAttrReader(result);
   const mediaStart = readMediaStart(attrReader);
   const playbackRate = readElementRateSpec(attrReader);
@@ -192,7 +203,7 @@ function compileTag(
       // No data-duration: mark as unresolved so caller can provide it
       unresolved = {
         id,
-        tagName: isVideo ? "video" : "audio",
+        tagName,
         src: getAttr(result, "src") ?? undefined,
         start: start ?? 0,
         mediaStart,
@@ -201,12 +212,7 @@ function compileTag(
     }
   }
 
-  // 2. Add data-has-audio to <video> elements. Muted videos are visual-only by
-  // contract; audible media should be represented by either an unmuted video
-  // with data-has-audio="true" or a separate <audio> element.
-  if (isVideo && !hasAttr(result, "data-has-audio")) {
-    result = injectAttr(result, "data-has-audio", hasAttr(result, "muted") ? "false" : "true");
-  }
+  result = withVideoAudioFlag(result, isVideo);
 
   return { tag: result, unresolved };
 }
