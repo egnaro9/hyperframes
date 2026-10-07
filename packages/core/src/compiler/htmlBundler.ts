@@ -153,8 +153,8 @@ function rebaseCssUrls(css: string, cssFileDir: string, projectDir: string): str
     const rebased = encodeUrlPath(relative(resolvedRoot, absolutePath).split(sep).join("/"));
     if (rebased === basePath) return full;
     const escapedSuffix = suffix.replace(
-      /[\x00-\x20\x7f"'()\\<>]/g,
-      (char) => `\\${char.charCodeAt(0).toString(16).padStart(6, "0")}`,
+      /[\s\p{Cc}"'()\\<>]/gu,
+      (char) => `\\${char.codePointAt(0)!.toString(16).padStart(6, "0")}`,
     );
     return `url(${quote || ""}${rebased}${escapedSuffix}${quote || ""})`;
   });
