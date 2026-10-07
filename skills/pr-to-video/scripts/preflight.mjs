@@ -2,8 +2,7 @@
 
 import { spawnSync } from "node:child_process";
 import { realpathSync } from "node:fs";
-import { pathToFileURL } from "node:url";
-import { invocation } from "../../hyperframes/scripts/plugin-cli.mjs";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 export function hasCliCommand(helpText, command) {
   const escaped = command.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -11,10 +10,11 @@ export function hasCliCommand(helpText, command) {
 }
 
 export function runCliPreflight({ command = "check", spawn = spawnSync } = {}) {
-  const cli = invocation(["--help"]);
-  const result = spawn(cli.command, cli.args, {
+  const launcher = fileURLToPath(
+    new URL("../../hyperframes/scripts/plugin-cli.mjs", import.meta.url),
+  );
+  const result = spawn(process.execPath, [launcher, "--help"], {
     encoding: "utf8",
-    env: cli.env,
     windowsHide: true,
   });
   const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
